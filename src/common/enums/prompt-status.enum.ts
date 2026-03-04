@@ -1,0 +1,7 @@
+export enum PromptStatus {
+  QUEUED = 'QUEUED',
+  RUNNING = 'RUNNING',
+  SUCCEEDED = 'SUCCEEDED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
+}

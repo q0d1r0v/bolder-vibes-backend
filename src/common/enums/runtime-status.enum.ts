@@ -1,0 +1,7 @@
+export enum RuntimeStatus {
+  STOPPED = 'STOPPED',
+  BUILDING = 'BUILDING',
+  RUNNING = 'RUNNING',
+  FAILED = 'FAILED',
+  RESTARTING = 'RESTARTING',
+}

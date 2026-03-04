@@ -1,0 +1,230 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProjectStatus {
+  DRAFT
+  GENERATING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+enum ProjectVisibility {
+  PRIVATE
+  TEAM
+  PUBLIC
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum PromptStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum VersionSource {
+  USER
+  AI
+  ROLLBACK
+  SYSTEM
+}
+
+enum RuntimeStatus {
+  STOPPED
+  BUILDING
+  RUNNING
+  FAILED
+  RESTARTING
+}
+
+enum SandboxProvider {
+  DOCKER
+}
+
+enum FileKind {
+  SOURCE
+  CONFIG
+  ASSET
+  GENERATED
+}
+
+model User {
+  id          String           @id @default(uuid())
+  email       String           @unique
+  displayName String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  projects    Project[]        @relation("ProjectOwner")
+  promptRuns  PromptRun[]      @relation("PromptRequestedBy")
+  versions    ProjectVersion[] @relation("VersionCreatedBy")
+
+  @@map("users")
+}
+
+model Project {
+  id                String            @id @default(uuid())
+  slug              String            @unique
+  name              String
+  description       String?
+  status            ProjectStatus     @default(DRAFT)
+  visibility        ProjectVisibility @default(PRIVATE)
+  frontendFramework String            @default("nextjs")
+  backendFramework  String            @default("nestjs")
+  runtimeStrategy   String            @default("docker-sandbox")
+  previewUrl        String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  ownerId           String
+  owner             User              @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  chats             ProjectChat[]
+  files             ProjectFile[]
+  versions          ProjectVersion[]
+  promptRuns        PromptRun[]
+  runtime           SandboxRuntime?
+
+  @@index([ownerId, createdAt])
+  @@map("projects")
+}
+
+model ProjectChat {
+  id         String         @id @default(uuid())
+  title      String
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  projectId  String
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages   ProjectMessage[]
+  promptRuns PromptRun[]
+
+  @@index([projectId, createdAt])
+  @@map("project_chats")
+}
+
+model ProjectMessage {
+  id        String      @id @default(uuid())
+  role      MessageRole
+  content   String      @db.Text
+  model     String?
+  metadata  Json?
+  createdAt DateTime    @default(now())
+  chatId    String
+  chat      ProjectChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@map("project_messages")
+}
+
+model ProjectFile {
+  id        String    @id @default(uuid())
+  path      String
+  content   String    @db.Text
+  language  String?
+  kind      FileKind  @default(SOURCE)
+  isEntry   Boolean   @default(false)
+  sizeBytes Int       @default(0)
+  checksum  String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, path])
+  @@index([projectId, updatedAt])
+  @@map("project_files")
+}
+
+model ProjectVersion {
+  id          String        @id @default(uuid())
+  version     Int
+  source      VersionSource @default(SYSTEM)
+  summary     String
+  manifest    Json?
+  createdAt   DateTime      @default(now())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  promptRunId String?       @unique
+  promptRun   PromptRun?    @relation(fields: [promptRunId], references: [id], onDelete: SetNull)
+  createdById String?
+  createdBy   User?         @relation("VersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, version])
+  @@index([projectId, createdAt])
+  @@map("project_versions")
+}
+
+model PromptRun {
+  id           String         @id @default(uuid())
+  provider     String         @default("openai")
+  model        String         @default("gpt-4.1")
+  prompt       String         @db.Text
+  status       PromptStatus   @default(QUEUED)
+  plan         Json?
+  resultSummary String?
+  errorMessage String?
+  tokensInput  Int?
+  tokensOutput Int?
+  createdAt    DateTime       @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  projectId    String
+  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chatId       String?
+  chat         ProjectChat?   @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  requestedById String?
+  requestedBy  User?          @relation("PromptRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  version      ProjectVersion?
+
+  @@index([projectId, createdAt])
+  @@index([status, createdAt])
+  @@map("prompt_runs")
+}
+
+model SandboxRuntime {
+  id            String          @id @default(uuid())
+  provider      SandboxProvider @default(DOCKER)
+  status        RuntimeStatus   @default(STOPPED)
+  containerName String?
+  imageTag      String?
+  previewUrl    String?
+  hostPort      Int?
+  cpuLimit      String          @default("1")
+  memoryLimitMb Int             @default(512)
+  networkMode   String          @default("bridge")
+  lastCommand   String?
+  startedAt     DateTime?
+  stoppedAt     DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  projectId     String          @unique
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  events        RuntimeEvent[]
+
+  @@map("sandbox_runtimes")
+}
+
+model RuntimeEvent {
+  id        String         @id @default(uuid())
+  type      String
+  message   String
+  payload   Json?
+  createdAt DateTime       @default(now())
+  runtimeId String
+  runtime   SandboxRuntime @relation(fields: [runtimeId], references: [id], onDelete: Cascade)
+
+  @@index([runtimeId, createdAt])
+  @@map("runtime_events")
+}
