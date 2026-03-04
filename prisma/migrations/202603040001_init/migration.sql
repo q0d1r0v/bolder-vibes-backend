@@ -25,11 +25,17 @@ CREATE TYPE "SandboxProvider" AS ENUM ('DOCKER');
 -- CreateEnum
 CREATE TYPE "FileKind" AS ENUM ('SOURCE', 'CONFIG', 'ASSET', 'GENERATED');
 
+-- CreateEnum
+CREATE TYPE "UserRole" AS ENUM ('USER', 'ADMIN');
+
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "displayName" TEXT,
+    "passwordHash" TEXT,
+    "role" "UserRole" NOT NULL DEFAULT 'USER',
+    "lastLoginAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

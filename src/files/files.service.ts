@@ -18,8 +18,12 @@ export class FilesService {
     private readonly realtimeService: RealtimeService,
   ) {}
 
-  async listFiles(projectId: string, query: ListProjectFilesQueryDto) {
-    await this.projectsService.ensureProject(projectId);
+  async listFiles(
+    projectId: string,
+    query: ListProjectFilesQueryDto,
+    ownerUserId?: string,
+  ) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     return this.prisma.projectFile.findMany({
       where: {
@@ -36,8 +40,12 @@ export class FilesService {
     });
   }
 
-  async saveFiles(projectId: string, dto: UpsertProjectFilesDto) {
-    await this.projectsService.ensureProject(projectId);
+  async saveFiles(
+    projectId: string,
+    dto: UpsertProjectFilesDto,
+    ownerUserId?: string,
+  ) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     if (!dto.files?.length) {
       throw new BadRequestException('files must contain at least one item.');

@@ -11,29 +11,44 @@ export class RuntimeCommandFactory {
     const imageTag = `bolder-vibes-project-${projectId.slice(0, 12)}`;
     const containerName = `bolder-vibes-sandbox-${projectId.slice(0, 12)}`;
     const projectPath = `${this.config.projectsRoot}/${projectId}`;
+    const docker = this.config.dockerBinary;
+    const buildArgs = [docker, 'build', '-t', imageTag, projectPath];
+    const startArgs = [
+      docker,
+      'run',
+      '-d',
+      '--name',
+      containerName,
+      `--cpus=${this.config.runtimeCpuLimit}`,
+      `--memory=${this.config.runtimeMemoryMb}m`,
+      '--pids-limit=256',
+      '--security-opt=no-new-privileges',
+      '--read-only',
+      '--network',
+      this.config.dockerNetwork,
+      '-p',
+      `${hostPort}:${this.config.runtimeInternalPort}`,
+      imageTag,
+    ];
+    const stopArgs = [docker, 'stop', containerName];
+    const removeArgs = [docker, 'rm', '-f', containerName];
 
     return {
       hostPort,
       imageTag,
       containerName,
+      projectPath,
       previewUrl: `${this.config.previewBaseUrl}/projects/${projectId}`,
       cpuLimit: this.config.runtimeCpuLimit,
       memoryLimitMb: this.config.runtimeMemoryMb,
       networkMode: this.config.dockerNetwork,
-      buildCommand: `docker build -t ${imageTag} ${projectPath}`,
-      startCommand: [
-        'docker run -d',
-        `--name ${containerName}`,
-        `--cpus=${this.config.runtimeCpuLimit}`,
-        `--memory=${this.config.runtimeMemoryMb}m`,
-        '--pids-limit=256',
-        '--security-opt=no-new-privileges',
-        '--read-only',
-        `--network ${this.config.dockerNetwork}`,
-        `-p ${hostPort}:3000`,
-        imageTag,
-      ].join(' '),
-      stopCommand: `docker stop ${containerName} && docker rm -f ${containerName}`,
+      buildArgs,
+      startArgs,
+      stopArgs,
+      removeArgs,
+      buildCommand: buildArgs.join(' '),
+      startCommand: startArgs.join(' '),
+      stopCommand: `${stopArgs.join(' ')} && ${removeArgs.join(' ')}`,
     };
   }
 }

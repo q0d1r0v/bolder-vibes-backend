@@ -1,26 +1,39 @@
 import {
   BadRequestException,
+  Inject,
+  forwardRef,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
+import { AiQueueService } from '@/ai/ai-queue.service';
 import { ChatsService } from '@/chats/chats.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { ProjectsService } from '@/projects/projects.service';
 import { RealtimeService } from '@/realtime/realtime.service';
 import { CreatePromptRunDto } from '@/ai/dto/create-prompt-run.dto';
+import { getAppConfig } from '@/config/app.config';
 
 @Injectable()
 export class AiService {
+  private readonly config = getAppConfig();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectsService: ProjectsService,
     private readonly chatsService: ChatsService,
     private readonly realtimeService: RealtimeService,
+    @Inject(forwardRef(() => AiQueueService))
+    private readonly aiQueueService: AiQueueService,
   ) {}
 
-  async createPromptRun(projectId: string, dto: CreatePromptRunDto) {
-    await this.projectsService.ensureProject(projectId);
+  async createPromptRun(
+    projectId: string,
+    dto: CreatePromptRunDto,
+    ownerUserId?: string,
+  ) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     if (!dto.prompt?.trim()) {
       throw new BadRequestException('prompt is required.');
@@ -30,13 +43,25 @@ export class AiService {
       await this.chatsService.assertChat(projectId, dto.chatId);
     }
 
-    const requestedBy = dto.requestedByEmail?.trim()
-      ? await this.prisma.user.upsert({
-          where: { email: dto.requestedByEmail.trim() },
-          update: {},
-          create: { email: dto.requestedByEmail.trim() },
+    const requestedBy = ownerUserId
+      ? await this.prisma.user.findUnique({
+          where: { id: ownerUserId },
+          select: {
+            id: true,
+            email: true,
+          },
         })
-      : null;
+      : dto.requestedByEmail?.trim()
+        ? await this.prisma.user.upsert({
+            where: { email: dto.requestedByEmail.trim().toLowerCase() },
+            update: {},
+            create: { email: dto.requestedByEmail.trim().toLowerCase() },
+            select: {
+              id: true,
+              email: true,
+            },
+          })
+        : null;
 
     const promptRun = await this.prisma.$transaction(async (transaction) => {
       if (dto.chatId && dto.autoRecordUserMessage) {
@@ -54,8 +79,8 @@ export class AiService {
           projectId,
           chatId: dto.chatId,
           requestedById: requestedBy?.id,
-          provider: dto.provider ?? 'openai',
-          model: dto.model ?? 'gpt-4.1',
+          provider: dto.provider ?? this.config.aiDefaultProvider,
+          model: dto.model ?? this.resolveModel(dto.provider),
           prompt: dto.prompt.trim(),
           plan: buildDefaultAgentPlan(dto.prompt),
           status: 'QUEUED',
@@ -67,11 +92,18 @@ export class AiService {
       promptRun,
     });
 
+    const queue = await this.aiQueueService.enqueuePromptRun(promptRun.id);
+
+    this.realtimeService.emitProjectEvent(projectId, 'prompt.queued', {
+      promptRunId: promptRun.id,
+      queue,
+    });
+
     return promptRun;
   }
 
-  async listPromptRuns(projectId: string) {
-    await this.projectsService.ensureProject(projectId);
+  async listPromptRuns(projectId: string, ownerUserId?: string) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     return this.prisma.promptRun.findMany({
       where: { projectId },
@@ -102,8 +134,9 @@ export class AiService {
     status: 'RUNNING' | 'SUCCEEDED' | 'FAILED',
     summary?: string,
     errorMessage?: string,
+    ownerUserId?: string,
   ) {
-    await this.projectsService.ensureProject(projectId);
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     const existingPromptRun = await this.prisma.promptRun.findFirst({
       where: {
@@ -140,6 +173,67 @@ export class AiService {
     });
 
     return promptRun;
+  }
+
+  async getPromptRunWithContext(promptRunId: string) {
+    return this.prisma.promptRun.findUnique({
+      where: { id: promptRunId },
+      include: {
+        project: {
+          include: {
+            owner: {
+              select: {
+                id: true,
+                email: true,
+                displayName: true,
+              },
+            },
+          },
+        },
+        requestedBy: {
+          select: {
+            id: true,
+            email: true,
+          },
+        },
+      },
+    }) as Promise<Prisma.PromptRunGetPayload<{
+      include: {
+        project: {
+          include: {
+            owner: {
+              select: {
+                id: true;
+                email: true;
+                displayName: true;
+              };
+            };
+          };
+        };
+        requestedBy: {
+          select: {
+            id: true;
+            email: true;
+          };
+        };
+      };
+    }> | null>;
+  }
+
+  private resolveModel(provider?: string) {
+    if (provider === 'anthropic') {
+      return this.config.anthropicModel;
+    }
+
+    if (provider === 'openai') {
+      return this.config.openAiModel;
+    }
+
+    return provider === 'mock'
+      ? 'mock-template-v1'
+      : this.config.aiDefaultProvider === 'anthropic'
+        ? this.config.anthropicModel
+        : this.config.openAiModel;
   }
 }
 

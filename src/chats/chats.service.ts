@@ -20,8 +20,12 @@ export class ChatsService {
     private readonly realtimeService: RealtimeService,
   ) {}
 
-  async createChat(projectId: string, dto: CreateChatDto) {
-    await this.projectsService.ensureProject(projectId);
+  async createChat(
+    projectId: string,
+    dto: CreateChatDto,
+    ownerUserId?: string,
+  ) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     if (!dto.title?.trim()) {
       throw new BadRequestException('title is required.');
@@ -48,8 +52,8 @@ export class ChatsService {
     return chat;
   }
 
-  async listChats(projectId: string) {
-    await this.projectsService.ensureProject(projectId);
+  async listChats(projectId: string, ownerUserId?: string) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     return this.prisma.projectChat.findMany({
       where: { projectId },
@@ -66,7 +70,13 @@ export class ChatsService {
     });
   }
 
-  async addMessage(projectId: string, chatId: string, dto: CreateMessageDto) {
+  async addMessage(
+    projectId: string,
+    chatId: string,
+    dto: CreateMessageDto,
+    ownerUserId?: string,
+  ) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
     await this.assertChat(projectId, chatId);
 
     if (!dto.content?.trim()) {
@@ -95,7 +105,8 @@ export class ChatsService {
     return message;
   }
 
-  async listMessages(projectId: string, chatId: string) {
+  async listMessages(projectId: string, chatId: string, ownerUserId?: string) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
     await this.assertChat(projectId, chatId);
 
     return this.prisma.projectMessage.findMany({

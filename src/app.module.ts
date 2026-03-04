@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AiModule } from '@/ai/ai.module';
 import { AppController } from '@/app.controller';
 import { AppService } from '@/app.service';
+import { AuthModule } from '@/auth/auth.module';
 import { ChatsModule } from '@/chats/chats.module';
 import { FilesModule } from '@/files/files.module';
 import { HealthModule } from '@/health/health.module';
@@ -13,6 +14,7 @@ import { RuntimeModule } from '@/runtime/runtime.module';
 @Module({
   imports: [
     PrismaModule,
+    AuthModule,
     RealtimeModule,
     HealthModule,
     ProjectsModule,

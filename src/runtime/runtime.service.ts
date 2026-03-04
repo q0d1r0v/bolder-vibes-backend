@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { ProjectStatus } from '@/common/enums/project-status.enum';
 import { RuntimeStatus } from '@/common/enums/runtime-status.enum';
@@ -7,6 +12,7 @@ import { ProjectsService } from '@/projects/projects.service';
 import { RealtimeService } from '@/realtime/realtime.service';
 import { RuntimeActionDto } from '@/runtime/dto/runtime-action.dto';
 import { RuntimeCommandFactory } from '@/runtime/runtime-command.factory';
+import { SandboxExecutorService } from '@/runtime/sandbox-executor.service';
 
 @Injectable()
 export class RuntimeService {
@@ -15,10 +21,11 @@ export class RuntimeService {
     private readonly projectsService: ProjectsService,
     private readonly runtimeCommandFactory: RuntimeCommandFactory,
     private readonly realtimeService: RealtimeService,
+    private readonly sandboxExecutorService: SandboxExecutorService,
   ) {}
 
-  async getRuntime(projectId: string) {
-    await this.projectsService.ensureProject(projectId);
+  async getRuntime(projectId: string, ownerUserId?: string) {
+    await this.projectsService.ensureProject(projectId, ownerUserId);
 
     const runtime = await this.prisma.sandboxRuntime.findUnique({
       where: { projectId },
@@ -41,9 +48,32 @@ export class RuntimeService {
     return runtime;
   }
 
-  async startRuntime(projectId: string, dto: RuntimeActionDto) {
-    const project = await this.projectsService.ensureProject(projectId);
+  async startRuntime(
+    projectId: string,
+    dto: RuntimeActionDto,
+    ownerUserId?: string,
+  ) {
+    const project = await this.projectsService.ensureProject(
+      projectId,
+      ownerUserId,
+    );
     const commandSet = this.runtimeCommandFactory.build(projectId, dto.port);
+    const requestedBy = dto.requestedBy ?? ownerUserId ?? 'system';
+
+    let execution: unknown;
+
+    try {
+      execution = await this.sandboxExecutorService.startProject(
+        projectId,
+        dto.port,
+        dto.forceRebuild,
+      );
+    } catch (error) {
+      await this.persistRuntimeFailure(projectId, 'start', commandSet, error);
+      throw new BadGatewayException(
+        error instanceof Error ? error.message : 'Runtime start failed.',
+      );
+    }
 
     await this.prisma.$transaction(async (transaction) => {
       const runtime = await transaction.sandboxRuntime.upsert({
@@ -89,7 +119,8 @@ export class RuntimeService {
             payload: {
               buildCommand: commandSet.buildCommand,
               startCommand: commandSet.startCommand,
-              requestedBy: dto.requestedBy,
+              execution: execution as Prisma.InputJsonValue,
+              requestedBy,
               note: dto.note,
             },
           },
@@ -124,12 +155,30 @@ export class RuntimeService {
     return runtime;
   }
 
-  async stopRuntime(projectId: string, dto: RuntimeActionDto) {
-    const runtime = await this.getRuntime(projectId);
+  async stopRuntime(
+    projectId: string,
+    dto: RuntimeActionDto,
+    ownerUserId?: string,
+  ) {
+    const runtime = await this.getRuntime(projectId, ownerUserId);
     const commandSet = this.runtimeCommandFactory.build(
       projectId,
       runtime.hostPort ?? dto.port,
     );
+    const requestedBy = dto.requestedBy ?? ownerUserId ?? 'system';
+    let execution: unknown;
+
+    try {
+      execution = await this.sandboxExecutorService.stopProject(
+        projectId,
+        runtime.hostPort ?? dto.port,
+      );
+    } catch (error) {
+      await this.persistRuntimeFailure(projectId, 'stop', commandSet, error);
+      throw new BadGatewayException(
+        error instanceof Error ? error.message : 'Runtime stop failed.',
+      );
+    }
 
     await this.prisma.$transaction([
       this.prisma.sandboxRuntime.update({
@@ -147,14 +196,15 @@ export class RuntimeService {
           message: 'Sandbox stop requested.',
           payload: {
             stopCommand: commandSet.stopCommand,
-            requestedBy: dto.requestedBy,
+            execution: execution as Prisma.InputJsonValue,
+            requestedBy,
             note: dto.note,
           },
         },
       }),
     ]);
 
-    const updatedRuntime = await this.getRuntime(projectId);
+    const updatedRuntime = await this.getRuntime(projectId, ownerUserId);
 
     this.realtimeService.emitProjectEvent(projectId, 'runtime.updated', {
       action: 'stop',
@@ -164,12 +214,31 @@ export class RuntimeService {
     return updatedRuntime;
   }
 
-  async restartRuntime(projectId: string, dto: RuntimeActionDto) {
-    const runtime = await this.getRuntime(projectId);
+  async restartRuntime(
+    projectId: string,
+    dto: RuntimeActionDto,
+    ownerUserId?: string,
+  ) {
+    const runtime = await this.getRuntime(projectId, ownerUserId);
     const commandSet = this.runtimeCommandFactory.build(
       projectId,
       dto.port ?? runtime.hostPort ?? undefined,
     );
+    const requestedBy = dto.requestedBy ?? ownerUserId ?? 'system';
+    let execution: unknown;
+
+    try {
+      execution = await this.sandboxExecutorService.restartProject(
+        projectId,
+        dto.port ?? runtime.hostPort ?? undefined,
+        dto.forceRebuild,
+      );
+    } catch (error) {
+      await this.persistRuntimeFailure(projectId, 'restart', commandSet, error);
+      throw new BadGatewayException(
+        error instanceof Error ? error.message : 'Runtime restart failed.',
+      );
+    }
 
     await this.prisma.$transaction([
       this.prisma.sandboxRuntime.update({
@@ -189,14 +258,15 @@ export class RuntimeService {
           message: 'Sandbox restart requested.',
           payload: {
             restartCommand: `${commandSet.stopCommand} && ${commandSet.startCommand}`,
-            requestedBy: dto.requestedBy,
+            execution: execution as Prisma.InputJsonValue,
+            requestedBy,
             note: dto.note,
           },
         },
       }),
     ]);
 
-    const updatedRuntime = await this.getRuntime(projectId);
+    const updatedRuntime = await this.getRuntime(projectId, ownerUserId);
 
     this.realtimeService.emitProjectEvent(projectId, 'runtime.updated', {
       action: 'restart',
@@ -204,5 +274,59 @@ export class RuntimeService {
     });
 
     return updatedRuntime;
+  }
+
+  private async persistRuntimeFailure(
+    projectId: string,
+    action: 'start' | 'stop' | 'restart',
+    commandSet: ReturnType<RuntimeCommandFactory['build']>,
+    error: unknown,
+  ) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unknown runtime execution error.';
+
+    const runtime = await this.prisma.sandboxRuntime.upsert({
+      where: { projectId },
+      create: {
+        projectId,
+        provider: 'DOCKER',
+        status: 'FAILED',
+        containerName: commandSet.containerName,
+        imageTag: commandSet.imageTag,
+        hostPort: commandSet.hostPort,
+        previewUrl: commandSet.previewUrl,
+        cpuLimit: commandSet.cpuLimit,
+        memoryLimitMb: commandSet.memoryLimitMb,
+        networkMode: commandSet.networkMode,
+        lastCommand:
+          action === 'start'
+            ? commandSet.startCommand
+            : action === 'stop'
+              ? commandSet.stopCommand
+              : `${commandSet.stopCommand} && ${commandSet.startCommand}`,
+      },
+      update: {
+        status: 'FAILED',
+        lastCommand:
+          action === 'start'
+            ? commandSet.startCommand
+            : action === 'stop'
+              ? commandSet.stopCommand
+              : `${commandSet.stopCommand} && ${commandSet.startCommand}`,
+      },
+    });
+
+    await this.prisma.runtimeEvent.create({
+      data: {
+        runtimeId: runtime.id,
+        type: `${action}-failed`,
+        message: `Runtime ${action} failed.`,
+        payload: {
+          error: message,
+        },
+      },
+    });
   }
 }

@@ -22,15 +22,19 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: bolder_vibes_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 3801
+      POSTGRES_DB: ${POSTGRES_DB:-bolder_vibes_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-3801}
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ 'CMD-SHELL', 'pg_isready -U postgres -d bolder_vibes_db' ]
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-bolder_vibes_db}',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5

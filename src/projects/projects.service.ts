@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
@@ -20,20 +21,11 @@ export class ProjectsService {
     private readonly realtimeService: RealtimeService,
   ) {}
 
-  async createProject(dto: CreateProjectDto) {
+  async createProject(dto: CreateProjectDto, ownerUserId?: string) {
     this.assertRequiredString(dto.name, 'name');
-    this.assertRequiredString(dto.ownerEmail, 'ownerEmail');
-
-    const owner = await this.prisma.user.upsert({
-      where: { email: dto.ownerEmail },
-      update: {
-        displayName: dto.ownerDisplayName,
-      },
-      create: {
-        email: dto.ownerEmail,
-        displayName: dto.ownerDisplayName,
-      },
-    });
+    const owner = ownerUserId
+      ? await this.resolveAuthenticatedOwner(ownerUserId, dto.ownerDisplayName)
+      : await this.resolveLegacyOwner(dto);
 
     const slug = await this.generateUniqueSlug(dto.name);
 
@@ -74,11 +66,12 @@ export class ProjectsService {
     return project;
   }
 
-  async listProjects(query: ListProjectsQueryDto) {
+  async listProjects(query: ListProjectsQueryDto, ownerUserId?: string) {
     const page = Math.max(1, Number(query.page ?? 1));
     const limit = Math.min(50, Math.max(1, Number(query.limit ?? 10)));
 
     const where: Prisma.ProjectWhereInput = {
+      ownerId: ownerUserId,
       owner: query.ownerEmail
         ? {
             email: query.ownerEmail,
@@ -108,9 +101,12 @@ export class ProjectsService {
     return buildPaginatedResponse(items, total, page, limit);
   }
 
-  async getProject(projectId: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
+  async getProject(projectId: string, ownerUserId?: string) {
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        ownerId: ownerUserId,
+      },
       include: projectDetailInclude,
     });
 
@@ -121,8 +117,12 @@ export class ProjectsService {
     return project;
   }
 
-  async updateProject(projectId: string, dto: UpdateProjectDto) {
-    await this.ensureProject(projectId);
+  async updateProject(
+    projectId: string,
+    dto: UpdateProjectDto,
+    ownerUserId?: string,
+  ) {
+    await this.ensureProject(projectId, ownerUserId);
 
     const project = await this.prisma.project.update({
       where: { id: projectId },
@@ -142,15 +142,19 @@ export class ProjectsService {
     return project;
   }
 
-  async ensureProject(projectId: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
+  async ensureProject(projectId: string, ownerUserId?: string) {
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        ownerId: ownerUserId,
+      },
       select: {
         id: true,
         slug: true,
         name: true,
         status: true,
         previewUrl: true,
+        ownerId: true,
       },
     });
 
@@ -183,6 +187,54 @@ export class ProjectsService {
     if (!value?.trim()) {
       throw new BadRequestException(`${fieldName} is required.`);
     }
+  }
+
+  private async resolveAuthenticatedOwner(
+    ownerUserId: string,
+    displayName?: string,
+  ) {
+    const owner = await this.prisma.user.findUnique({
+      where: { id: ownerUserId },
+      select: {
+        id: true,
+        displayName: true,
+      },
+    });
+
+    if (!owner) {
+      throw new UnauthorizedException('Authenticated owner was not found.');
+    }
+
+    if (displayName?.trim() && displayName.trim() !== owner.displayName) {
+      await this.prisma.user.update({
+        where: { id: ownerUserId },
+        data: {
+          displayName: displayName.trim(),
+        },
+      });
+    }
+
+    return {
+      id: ownerUserId,
+    };
+  }
+
+  private async resolveLegacyOwner(dto: CreateProjectDto) {
+    this.assertRequiredString(dto.ownerEmail, 'ownerEmail');
+
+    return this.prisma.user.upsert({
+      where: { email: dto.ownerEmail!.toLowerCase() },
+      update: {
+        displayName: dto.ownerDisplayName?.trim(),
+      },
+      create: {
+        email: dto.ownerEmail!.toLowerCase(),
+        displayName: dto.ownerDisplayName?.trim(),
+      },
+      select: {
+        id: true,
+      },
+    });
   }
 }
 

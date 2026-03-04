@@ -62,10 +62,18 @@ enum FileKind {
   GENERATED
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
 model User {
   id          String           @id @default(uuid())
   email       String           @unique
   displayName String?
+  passwordHash String?
+  role        UserRole         @default(USER)
+  lastLoginAt DateTime?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   projects    Project[]        @relation("ProjectOwner")

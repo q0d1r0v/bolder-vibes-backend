@@ -8,5 +8,6 @@ import { ProjectsModule } from '@/projects/projects.module';
   imports: [ProjectsModule],
   controllers: [FilesController],
   providers: [FilesService],
+  exports: [FilesService],
 })
 export class FilesModule {}
