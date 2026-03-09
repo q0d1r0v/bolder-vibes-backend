@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── ENUMS ──────────────────────────────────────────────
+enum Role {
+  USER
+  ADMIN
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum AgentType {
+  PLANNER
+  DEVELOPER
+  REFACTOR
+}
+
+enum AgentTaskStatus {
+  PENDING
+  PLANNING
+  DEVELOPING
+  REFACTORING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentStepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// ─── MODELS ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  role         Role     @default(USER)
+  refreshToken String?  @map("refresh_token")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  projects      Project[]
+  conversations Conversation[]
+
+  @@map("users")
+}
+
+model Project {
+  id          String        @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  templateId  String?       @map("template_id")
+  settings    Json?         @default("{}")
+  ownerId     String        @map("owner_id") @db.Uuid
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  files         ProjectFile[]
+  conversations Conversation[]
+  agentTasks    AgentTask[]
+
+  @@index([ownerId])
+  @@map("projects")
+}
+
+model ProjectFile {
+  id        String   @id @default(uuid()) @db.Uuid
+  path      String
+  content   String   @db.Text
+  mimeType  String?  @map("mime_type")
+  size      Int      @default(0)
+  projectId String   @map("project_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions FileVersion[]
+
+  @@unique([projectId, path])
+  @@index([projectId])
+  @@map("project_files")
+}
+
+model FileVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  version     Int
+  content     String   @db.Text
+  diff        String?  @db.Text
+  message     String?
+  fileId      String   @map("file_id") @db.Uuid
+  agentStepId String?  @map("agent_step_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  file      ProjectFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  agentStep AgentStep?  @relation(fields: [agentStepId], references: [id])
+
+  @@unique([fileId, version])
+  @@index([fileId])
+  @@map("file_versions")
+}
+
+model Conversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String?
+  projectId String   @map("project_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  agentTasks AgentTask[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String      @id @default(uuid()) @db.Uuid
+  role           MessageRole
+  content        String      @db.Text
+  metadata       Json?
+  conversationId String      @map("conversation_id") @db.Uuid
+  agentTaskId    String?     @map("agent_task_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agentTask    AgentTask?   @relation(fields: [agentTaskId], references: [id])
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+model AgentTask {
+  id             String          @id @default(uuid()) @db.Uuid
+  status         AgentTaskStatus @default(PENDING)
+  prompt         String          @db.Text
+  plan           Json?
+  result         Json?
+  errorMessage   String?         @map("error_message") @db.Text
+  projectId      String          @map("project_id") @db.Uuid
+  conversationId String?         @map("conversation_id") @db.Uuid
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  completedAt    DateTime?       @map("completed_at")
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+  steps        AgentStep[]
+  messages     Message[]
+
+  @@index([projectId])
+  @@index([status])
+  @@map("agent_tasks")
+}
+
+model AgentStep {
+  id           String          @id @default(uuid()) @db.Uuid
+  agentType    AgentType       @map("agent_type")
+  stepOrder    Int             @map("step_order")
+  status       AgentStepStatus @default(PENDING)
+  input        Json?
+  output       Json?
+  tokenUsage   Json?           @map("token_usage")
+  errorMessage String?         @map("error_message") @db.Text
+  durationMs   Int?            @map("duration_ms")
+  taskId       String          @map("task_id") @db.Uuid
+  startedAt    DateTime?       @map("started_at")
+  completedAt  DateTime?       @map("completed_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  task         AgentTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileVersions FileVersion[]
+
+  @@unique([taskId, stepOrder])
+  @@index([taskId])
+  @@map("agent_steps")
+}
