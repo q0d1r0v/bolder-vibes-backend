@@ -1,4 +1,4 @@
-import { IsString, MinLength, MaxLength, IsOptional, IsUUID } from 'class-validator';
+import { IsString, MinLength, MaxLength, IsOptional } from 'class-validator';
 
 export class CreateProjectDto {
   @IsString()
@@ -12,6 +12,5 @@ export class CreateProjectDto {
   description?: string;
 
   @IsOptional()
-  @IsUUID()
   templateId?: string;
 }

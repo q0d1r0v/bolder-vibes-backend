@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Body,
   Query,
@@ -44,6 +45,14 @@ export class ConversationsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.conversationsService.findById(id, userId);
+  }
+
+  @Delete('conversations/:id')
+  remove(
+    @Param('id', ParseUuidPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.conversationsService.remove(id, userId);
   }
 
   @Post('conversations/:id/messages')

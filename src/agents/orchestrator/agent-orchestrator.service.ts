@@ -182,6 +182,8 @@ export class AgentOrchestratorService {
         refactorOutput.changes.length > 0
           ? refactorStep.id
           : devStep.id;
+      const summary =
+        refactorOutput.summary || devOutput.summary || 'Changes applied.';
 
       await this.applyFileChanges(
         projectId,
@@ -195,7 +197,7 @@ export class AgentOrchestratorService {
         data: {
           status: 'COMPLETED',
           result: {
-            summary: refactorOutput.summary || devOutput.summary,
+            summary,
             filesChanged: finalChanges.length,
             qualityReport: refactorOutput.qualityReport,
           },
@@ -203,21 +205,27 @@ export class AgentOrchestratorService {
         },
       });
 
-      // Add assistant message
-      await this.prisma.message.create({
-        data: {
-          role: 'ASSISTANT',
-          content:
-            refactorOutput.summary || devOutput.summary || 'Changes applied.',
-          conversationId,
-          agentTaskId: task.id,
-        },
+      // Conversation may be deleted while the task is running.
+      const currentTask = await this.prisma.agentTask.findUnique({
+        where: { id: task.id },
+        select: { conversationId: true },
       });
+
+      if (currentTask?.conversationId) {
+        await this.prisma.message.create({
+          data: {
+            role: 'ASSISTANT',
+            content: summary,
+            conversationId: currentTask.conversationId,
+            agentTaskId: task.id,
+          },
+        });
+      }
 
       return {
         taskId: task.id,
         status: AgentTaskStatus.COMPLETED,
-        summary: refactorOutput.summary || devOutput.summary,
+        summary,
         filesChanged: finalChanges.length,
       };
     } catch (error) {

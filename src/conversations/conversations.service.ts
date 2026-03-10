@@ -11,6 +11,18 @@ export class ConversationsService {
     private readonly projectsService: ProjectsService,
   ) {}
 
+  private async findOwnedConversation(id: string, userId: string) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id },
+    });
+
+    if (!conversation || conversation.userId !== userId) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    return conversation;
+  }
+
   async create(projectId: string, dto: CreateConversationDto, userId: string) {
     await this.projectsService.findById(projectId, userId);
 
@@ -62,7 +74,7 @@ export class ConversationsService {
   }
 
   async addMessage(conversationId: string, dto: CreateMessageDto, userId: string) {
-    const conversation = await this.findById(conversationId, userId);
+    const conversation = await this.findOwnedConversation(conversationId, userId);
 
     const message = await this.prisma.message.create({
       data: {
@@ -73,6 +85,23 @@ export class ConversationsService {
     });
 
     return { message, projectId: conversation.projectId };
+  }
+
+  async remove(id: string, userId: string) {
+    await this.findOwnedConversation(id, userId);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.agentTask.updateMany({
+        where: { conversationId: id },
+        data: { conversationId: null },
+      });
+
+      await tx.conversation.delete({
+        where: { id },
+      });
+    });
+
+    return { deleted: true };
   }
 
   async addAssistantMessage(conversationId: string, content: string, agentTaskId?: string) {

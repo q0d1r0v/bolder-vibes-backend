@@ -14,7 +14,7 @@ export class FilesService {
     private readonly prisma: PrismaService,
     private readonly projectsService: ProjectsService,
     private readonly versioningService: VersioningService,
-  ) {}
+  ) { }
 
   async create(projectId: string, dto: CreateFileDto, userId: string) {
     await this.projectsService.findById(projectId, userId);
@@ -49,6 +49,7 @@ export class FilesService {
       select: {
         id: true,
         path: true,
+        content: true,
         mimeType: true,
         size: true,
         updatedAt: true,
