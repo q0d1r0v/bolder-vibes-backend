@@ -7,6 +7,13 @@ export interface Runner {
     config?: Partial<SandboxConfig>,
   ): Promise<ExecutionResult>;
 
+  startLongRunning?(
+    projectId: string,
+    workDir: string,
+    command: string,
+    config?: Partial<SandboxConfig>,
+  ): Promise<{ containerId: string; port: number }>;
+
   cleanup(projectId: string): Promise<void>;
 }
 

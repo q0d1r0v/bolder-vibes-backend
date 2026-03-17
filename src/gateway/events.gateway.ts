@@ -7,10 +7,11 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, UseGuards } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { AgentOrchestratorService } from '@/agents/orchestrator/agent-orchestrator.service.js';
 import { CLIENT_EVENTS, SERVER_EVENTS } from './events/event-types.js';
 import type {
   JoinProjectPayload,
@@ -21,13 +22,13 @@ import type { JwtPayload } from '@/common/interfaces/index.js';
 @WebSocketGateway({
   namespace: '/ws',
   cors: {
-    origin: '*',
+    origin: process.env.CORS_ALLOWED_ORIGINS?.split(',').map((s) =>
+      s.trim(),
+    ) || ['http://localhost:5173'],
     credentials: true,
   },
 })
-export class EventsGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
-{
+export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
@@ -36,6 +37,8 @@ export class EventsGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Inject(forwardRef(() => AgentOrchestratorService))
+    private readonly orchestrator: AgentOrchestratorService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -66,33 +69,34 @@ export class EventsGateway
   }
 
   @SubscribeMessage(CLIENT_EVENTS.JOIN_PROJECT)
-  handleJoinProject(
+  async handleJoinProject(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: JoinProjectPayload,
   ) {
     const room = `project:${data.projectId}`;
-    client.join(room);
+    await client.join(room);
     this.logger.log(`Client ${client.id} joined room ${room}`);
     return { event: 'joined', data: { room } };
   }
 
   @SubscribeMessage(CLIENT_EVENTS.LEAVE_PROJECT)
-  handleLeaveProject(
+  async handleLeaveProject(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: JoinProjectPayload,
   ) {
     const room = `project:${data.projectId}`;
-    client.leave(room);
+    await client.leave(room);
     this.logger.log(`Client ${client.id} left room ${room}`);
     return { event: 'left', data: { room } };
   }
 
   @SubscribeMessage(CLIENT_EVENTS.CANCEL_TASK)
-  handleCancelTask(
+  async handleCancelTask(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: CancelTaskPayload,
   ) {
     this.logger.log(`Cancel task request: ${data.taskId}`);
+    await this.orchestrator.requestCancellation(data.taskId);
     return { event: 'cancel_acknowledged', data: { taskId: data.taskId } };
   }
 
@@ -186,7 +190,12 @@ export class EventsGateway
     });
   }
 
-  emitMessage(projectId: string, messageId: string, role: string, content: string) {
+  emitMessage(
+    projectId: string,
+    messageId: string,
+    role: string,
+    content: string,
+  ) {
     this.emitToProject(projectId, SERVER_EVENTS.MESSAGE_RECEIVED, {
       messageId,
       role,

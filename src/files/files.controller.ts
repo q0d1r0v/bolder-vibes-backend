@@ -7,11 +7,14 @@ import {
   Param,
   Body,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { FilesService } from './files.service.js';
 import { CreateFileDto, UpdateFileDto } from './dtos/index.js';
 import { CurrentUser } from '@/common/decorators/index.js';
 import { ParseUuidPipe } from '@/common/pipes/index.js';
 
+@ApiTags('Files')
+@ApiBearerAuth()
 @Controller('projects/:projectId/files')
 export class FilesController {
   constructor(private readonly filesService: FilesService) {}
@@ -77,6 +80,11 @@ export class FilesController {
     @Param('versionId', ParseUuidPipe) versionId: string,
     @CurrentUser('id') userId: string,
   ) {
-    return this.filesService.restoreVersion(projectId, fileId, versionId, userId);
+    return this.filesService.restoreVersion(
+      projectId,
+      fileId,
+      versionId,
+      userId,
+    );
   }
 }

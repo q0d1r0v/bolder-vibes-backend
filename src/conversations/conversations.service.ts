@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service.js';
 import { ProjectsService } from '@/projects/projects.service.js';
+import { EventsGateway } from '@/gateway/events.gateway.js';
 import { CreateConversationDto, CreateMessageDto } from './dtos/index.js';
 import { PaginationDto, PaginatedResponseDto } from '@/common/dtos/index.js';
 
@@ -9,6 +10,7 @@ export class ConversationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectsService: ProjectsService,
+    private readonly gateway: EventsGateway,
   ) {}
 
   private async findOwnedConversation(id: string, userId: string) {
@@ -35,7 +37,11 @@ export class ConversationsService {
     });
   }
 
-  async findAllByProject(projectId: string, userId: string, pagination: PaginationDto) {
+  async findAllByProject(
+    projectId: string,
+    userId: string,
+    pagination: PaginationDto,
+  ) {
     await this.projectsService.findById(projectId, userId);
 
     const where = { projectId, userId };
@@ -73,8 +79,15 @@ export class ConversationsService {
     return conversation;
   }
 
-  async addMessage(conversationId: string, dto: CreateMessageDto, userId: string) {
-    const conversation = await this.findOwnedConversation(conversationId, userId);
+  async addMessage(
+    conversationId: string,
+    dto: CreateMessageDto,
+    userId: string,
+  ) {
+    const conversation = await this.findOwnedConversation(
+      conversationId,
+      userId,
+    );
 
     const message = await this.prisma.message.create({
       data: {
@@ -83,6 +96,13 @@ export class ConversationsService {
         conversationId: conversation.id,
       },
     });
+
+    this.gateway.emitMessage(
+      conversation.projectId,
+      message.id,
+      'USER',
+      dto.content,
+    );
 
     return { message, projectId: conversation.projectId };
   }
@@ -104,7 +124,11 @@ export class ConversationsService {
     return { deleted: true };
   }
 
-  async addAssistantMessage(conversationId: string, content: string, agentTaskId?: string) {
+  async addAssistantMessage(
+    conversationId: string,
+    content: string,
+    agentTaskId?: string,
+  ) {
     return this.prisma.message.create({
       data: {
         role: 'ASSISTANT',

@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service.js';
 import { RegisterDto, LoginDto, RefreshTokenDto } from './dtos/index.js';
@@ -14,6 +15,8 @@ import { Public } from '@/common/decorators/index.js';
 import { CurrentUser } from '@/common/decorators/index.js';
 import type { RequestUser } from '@/common/interfaces/index.js';
 
+@ApiTags('Auth')
+@ApiBearerAuth()
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

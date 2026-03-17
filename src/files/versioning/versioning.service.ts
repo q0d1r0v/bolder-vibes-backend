@@ -21,7 +21,9 @@ export class VersioningService {
     });
 
     const nextVersion = (lastVersion?.version ?? 0) + 1;
-    const diff = oldContent ? computeDiff(oldContent, newContent, filePath) : null;
+    const diff = oldContent
+      ? computeDiff(oldContent, newContent, filePath)
+      : null;
 
     return this.prisma.fileVersion.create({
       data: {

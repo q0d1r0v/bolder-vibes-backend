@@ -34,7 +34,14 @@ import {
       isGlobal: true,
       validationSchema: envValidationSchema,
       validationOptions: { abortEarly: true },
-      load: [appConfig, authConfig, databaseConfig, redisConfig, aiConfig, corsConfig],
+      load: [
+        appConfig,
+        authConfig,
+        databaseConfig,
+        redisConfig,
+        aiConfig,
+        corsConfig,
+      ],
     }),
 
     // Rate limiting

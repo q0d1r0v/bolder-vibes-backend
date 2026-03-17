@@ -27,10 +27,7 @@ Review criteria:
 - Type safety
 - Consistent naming conventions`;
 
-export function buildRefactorUserPrompt(
-  plan: string,
-  changes: string,
-): string {
+export function buildRefactorUserPrompt(plan: string, changes: string): string {
   return `Original Plan:
 ${plan}
 

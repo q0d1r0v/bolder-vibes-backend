@@ -1,11 +1,8 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, forwardRef } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service.js';
 import { ProjectsService } from '@/projects/projects.service.js';
 import { VersioningService } from './versioning/versioning.service.js';
+import { EventsGateway } from '@/gateway/events.gateway.js';
 import { CreateFileDto, UpdateFileDto } from './dtos/index.js';
 
 @Injectable()
@@ -14,7 +11,9 @@ export class FilesService {
     private readonly prisma: PrismaService,
     private readonly projectsService: ProjectsService,
     private readonly versioningService: VersioningService,
-  ) { }
+    @Inject(forwardRef(() => EventsGateway))
+    private readonly gateway: EventsGateway,
+  ) {}
 
   async create(projectId: string, dto: CreateFileDto, userId: string) {
     await this.projectsService.findById(projectId, userId);
@@ -37,6 +36,8 @@ export class FilesService {
       dto.path,
       'Initial version',
     );
+
+    this.gateway.emitFileCreated(projectId, file.id, dto.path);
 
     return file;
   }
@@ -98,12 +99,15 @@ export class FilesService {
       dto.message,
     );
 
+    this.gateway.emitFileUpdated(projectId, fileId, file.path);
+
     return updated;
   }
 
   async remove(projectId: string, fileId: string, userId: string) {
-    await this.findById(projectId, fileId, userId);
+    const file = await this.findById(projectId, fileId, userId);
     await this.prisma.projectFile.delete({ where: { id: fileId } });
+    this.gateway.emitFileDeleted(projectId, fileId, file.path);
     return { deleted: true };
   }
 

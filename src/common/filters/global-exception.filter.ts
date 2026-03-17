@@ -48,9 +48,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         details = resp.details;
       }
       error = HttpStatus[status] || error;
-    } else if (
-      exception instanceof Prisma.PrismaClientKnownRequestError
-    ) {
+    } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       switch (exception.code) {
         case 'P2002':
           status = HttpStatus.CONFLICT;
@@ -77,7 +75,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       error,
       message,
       details,
-      requestId: (request as unknown as Record<string, unknown>).requestId as string,
+      requestId: (request as unknown as Record<string, unknown>)
+        .requestId as string,
       timestamp: new Date().toISOString(),
     };
 
@@ -87,7 +86,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         exception instanceof Error ? exception.stack : undefined,
       );
     } else {
-      this.logger.warn(`${request.method} ${request.url} ${status} - ${message}`);
+      this.logger.warn(
+        `${request.method} ${request.url} ${status} - ${message}`,
+      );
     }
 
     response.status(status).json(errorResponse);

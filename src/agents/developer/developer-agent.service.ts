@@ -53,9 +53,7 @@ export class DeveloperAgentService {
     );
 
     const output: DeveloperOutput = JSON.parse(response.content);
-    this.logger.log(
-      `Code generated: ${output.changes.length} file changes`,
-    );
+    this.logger.log(`Code generated: ${output.changes.length} file changes`);
 
     return { output, tokenUsage: response.tokenUsage };
   }

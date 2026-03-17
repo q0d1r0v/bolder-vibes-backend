@@ -2,6 +2,7 @@ import './register-paths.js';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 
@@ -31,6 +32,16 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1', {
     exclude: ['health'],
   });
+
+  // Swagger API documentation
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Bolder Vibes API')
+    .setDescription('AI Vibe Coding App Builder API')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
 
   // Global validation pipe
   app.useGlobalPipes(

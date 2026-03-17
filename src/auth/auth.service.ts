@@ -18,7 +18,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) { }
+  ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponseDto> {
     const existingUser = await this.prisma.user.findUnique({
@@ -67,7 +67,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
@@ -143,11 +146,15 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload as unknown as Record<string, unknown>, {
         secret: this.configService.get<string>('auth.accessSecret'),
-        expiresIn: this.configService.get<string>('auth.accessExpiration') as any,
+        expiresIn: this.configService.get<string>(
+          'auth.accessExpiration',
+        ) as any,
       }),
       this.jwtService.signAsync(payload as unknown as Record<string, unknown>, {
         secret: this.configService.get<string>('auth.refreshSecret'),
-        expiresIn: this.configService.get<string>('auth.refreshExpiration') as any,
+        expiresIn: this.configService.get<string>(
+          'auth.refreshExpiration',
+        ) as any,
       }),
     ]);
 

@@ -8,21 +8,21 @@ import {
   Body,
   Query,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ProjectsService } from './projects.service.js';
 import { CreateProjectDto, UpdateProjectDto } from './dtos/index.js';
 import { CurrentUser } from '@/common/decorators/index.js';
 import { ParseUuidPipe } from '@/common/pipes/index.js';
 import { PaginationDto } from '@/common/dtos/index.js';
 
+@ApiTags('Projects')
+@ApiBearerAuth()
 @Controller('projects')
 export class ProjectsController {
   constructor(private readonly projectsService: ProjectsService) {}
 
   @Post()
-  create(
-    @Body() dto: CreateProjectDto,
-    @CurrentUser('id') userId: string,
-  ) {
+  create(@Body() dto: CreateProjectDto, @CurrentUser('id') userId: string) {
     return this.projectsService.create(dto, userId);
   }
 

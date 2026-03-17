@@ -39,10 +39,7 @@ export class PlannerAgentService {
       ],
       {
         model: this.configService.get<string>('ai.openai.model', 'gpt-4'),
-        maxTokens: this.configService.get<number>(
-          'ai.openai.maxTokens',
-          4096,
-        ),
+        maxTokens: this.configService.get<number>('ai.openai.maxTokens', 4096),
         temperature: 0.3,
         responseFormat: 'json',
       },
