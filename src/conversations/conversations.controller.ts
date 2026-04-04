@@ -6,11 +6,9 @@ import {
   Param,
   Body,
   Query,
-  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ConversationsService } from './conversations.service.js';
-import { AgentOrchestratorService } from '@/agents/orchestrator/agent-orchestrator.service.js';
 import { CreateConversationDto, CreateMessageDto } from './dtos/index.js';
 import { CurrentUser } from '@/common/decorators/index.js';
 import { ParseUuidPipe } from '@/common/pipes/index.js';
@@ -20,11 +18,8 @@ import { PaginationDto } from '@/common/dtos/index.js';
 @ApiBearerAuth()
 @Controller()
 export class ConversationsController {
-  private readonly logger = new Logger(ConversationsController.name);
-
   constructor(
     private readonly conversationsService: ConversationsService,
-    private readonly orchestrator: AgentOrchestratorService,
   ) {}
 
   @Post('projects/:projectId/conversations')
@@ -71,22 +66,11 @@ export class ConversationsController {
     @Body() dto: CreateMessageDto,
     @CurrentUser('id') userId: string,
   ) {
-    const { message, projectId } = await this.conversationsService.addMessage(
+    const { message } = await this.conversationsService.addMessage(
       id,
       dto,
       userId,
     );
-
-    // Trigger AI pipeline asynchronously
-    this.orchestrator
-      .executeTask(projectId, id, dto.content, userId)
-      .catch((err) => {
-        this.logger.error(
-          'Agent pipeline error',
-          err instanceof Error ? err.stack : err,
-        );
-      });
-
     return message;
   }
 }

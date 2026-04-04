@@ -15,6 +15,7 @@ import { ConversationsModule } from './conversations/conversations.module.js';
 import { AgentsModule } from './agents/agents.module.js';
 import { GatewayModule } from './gateway/gateway.module.js';
 import { SandboxModule } from './sandbox/sandbox.module.js';
+import { DeployModule } from './deploy/deploy.module.js';
 import { JwtAuthGuard } from './common/guards/index.js';
 import { RolesGuard } from './common/guards/index.js';
 import {
@@ -83,6 +84,7 @@ import {
     AgentsModule,
     GatewayModule,
     SandboxModule,
+    DeployModule,
   ],
   controllers: [AppController],
   providers: [

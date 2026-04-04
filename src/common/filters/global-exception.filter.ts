@@ -61,11 +61,38 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           error = 'Not Found';
           message = 'Record not found';
           break;
+        case 'P2024':
+          status = HttpStatus.SERVICE_UNAVAILABLE;
+          error = 'Service Unavailable';
+          message = 'Database connection timed out. Please try again later.';
+          break;
+        case 'P2019':
+          status = HttpStatus.BAD_REQUEST;
+          error = 'Bad Request';
+          message = 'Invalid input data provided';
+          break;
+        case 'P2029':
+          status = HttpStatus.BAD_REQUEST;
+          error = 'Bad Request';
+          message = 'Query parameter limit exceeded';
+          break;
         default:
           status = HttpStatus.BAD_REQUEST;
           error = 'Bad Request';
           message = 'Database operation failed';
       }
+    } else if (
+      exception instanceof Prisma.PrismaClientInitializationError
+    ) {
+      status = HttpStatus.SERVICE_UNAVAILABLE;
+      error = 'Service Unavailable';
+      message = 'Database connection failed. Please try again later.';
+    } else if (
+      exception instanceof Prisma.PrismaClientValidationError
+    ) {
+      status = HttpStatus.BAD_REQUEST;
+      error = 'Bad Request';
+      message = 'Invalid data provided';
     } else if (exception instanceof Error) {
       message = isDebug ? exception.message : 'Internal server error';
     }

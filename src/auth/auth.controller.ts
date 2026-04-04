@@ -10,7 +10,13 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service.js';
-import { RegisterDto, LoginDto, RefreshTokenDto } from './dtos/index.js';
+import {
+  RegisterDto,
+  LoginDto,
+  RefreshTokenDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+} from './dtos/index.js';
 import { Public } from '@/common/decorators/index.js';
 import { CurrentUser } from '@/common/decorators/index.js';
 import type { RequestUser } from '@/common/interfaces/index.js';
@@ -54,5 +60,19 @@ export class AuthController {
   @Get('me')
   getProfile(@CurrentUser() user: RequestUser) {
     return user;
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.newPassword);
   }
 }

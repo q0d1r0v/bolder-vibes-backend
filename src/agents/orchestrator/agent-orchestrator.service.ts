@@ -11,6 +11,7 @@ import type { FileChange } from '../developer/developer.interface.js';
 import type { PipelineResult } from './pipeline.interface.js';
 import { AgentTaskStatus } from '@/common/enums/index.js';
 import { PaginationDto, PaginatedResponseDto } from '@/common/dtos/index.js';
+import { PreviewService } from '@/sandbox/preview/preview.service.js';
 
 @Injectable()
 export class AgentOrchestratorService {
@@ -28,6 +29,7 @@ export class AgentOrchestratorService {
     private readonly refactorAgent: RefactorAgentService,
     @Inject(forwardRef(() => EventsGateway))
     private readonly gateway: EventsGateway,
+    private readonly previewService: PreviewService,
   ) {}
 
   async executeTask(
@@ -55,6 +57,21 @@ export class AgentOrchestratorService {
         select: { path: true, content: true },
       });
       const fileTree = files.map((f) => f.path);
+
+      // Detect framework for AI prompt customization
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          name: true,
+          description: true,
+          templateId: true,
+          settings: true,
+        },
+      });
+      const framework = this.resolveFramework(
+        project?.templateId ?? null,
+        files,
+      );
 
       // Get conversation context
       const messages = await this.prisma.message.findMany({
@@ -99,6 +116,8 @@ export class AgentOrchestratorService {
           userPrompt,
           fileTree,
           conversationContext,
+          framework,
+          (chunk) => this.gateway.emitStepProgress(projectId, task.id, planStep.id, chunk),
         );
 
       const planDurationMs = Date.now() - startPlan;
@@ -152,19 +171,11 @@ export class AgentOrchestratorService {
         .map((f) => ({ path: f.path, content: f.content }));
 
       // Build project context for developer agent
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: {
-          name: true,
-          description: true,
-          templateId: true,
-          settings: true,
-        },
-      });
       const projectContext = [
         `Project: ${project?.name || 'Untitled'}`,
         project?.description ? `Description: ${project.description}` : '',
         project?.templateId ? `Template: ${project.templateId}` : '',
+        `Framework: ${framework}`,
         project?.settings
           ? `Settings: ${JSON.stringify(project.settings)}`
           : '',
@@ -186,6 +197,8 @@ export class AgentOrchestratorService {
           plan,
           fileContents,
           projectContext,
+          framework,
+          (chunk) => this.gateway.emitStepProgress(projectId, task.id, devStep.id, chunk),
         );
 
       const devDurationMs = Date.now() - startDev;
@@ -236,7 +249,11 @@ export class AgentOrchestratorService {
 
       const startRefactor = Date.now();
       const { output: refactorOutput, tokenUsage: refactorTokens } =
-        await this.refactorAgent.reviewAndRefactor(plan, devOutput);
+        await this.refactorAgent.reviewAndRefactor(
+          plan,
+          devOutput,
+          (chunk) => this.gateway.emitStepProgress(projectId, task.id, refactorStep.id, chunk),
+        );
 
       const refactorDurationMs = Date.now() - startRefactor;
       await this.prisma.agentStep.update({
@@ -271,6 +288,9 @@ export class AgentOrchestratorService {
         refactorOutput.summary || devOutput.summary || 'Changes applied.';
 
       await this.applyFileChanges(projectId, finalChanges, appliedStepId);
+
+      // Sync changed files to running preview (if any)
+      await this.syncToPreview(projectId, finalChanges);
 
       // Complete task
       const taskResult = {
@@ -396,13 +416,20 @@ export class AgentOrchestratorService {
     );
   }
 
-  async getTaskDetail(taskId: string) {
-    return this.prisma.agentTask.findUnique({
+  async getTaskDetail(taskId: string, projectId?: string) {
+    const task = await this.prisma.agentTask.findUnique({
       where: { id: taskId },
       include: {
         steps: { orderBy: { stepOrder: 'asc' } },
       },
     });
+
+    // If projectId is provided, verify the task belongs to this project
+    if (task && projectId && task.projectId !== projectId) {
+      return null;
+    }
+
+    return task;
   }
 
   private async isCancelled(taskId: string): Promise<boolean> {
@@ -415,6 +442,63 @@ export class AgentOrchestratorService {
       where: { id: taskId },
       data: { status: status as any },
     });
+  }
+
+  private async syncToPreview(
+    projectId: string,
+    changes: FileChange[],
+  ): Promise<void> {
+    for (const change of changes) {
+      await this.previewService.syncFile(
+        projectId,
+        change.filePath,
+        change.operation === 'delete' ? null : (change.content ?? null),
+      );
+    }
+  }
+
+  private resolveFramework(
+    templateId: string | null,
+    files: { path: string; content: string }[],
+  ): string {
+    // 1. Check template ID directly
+    if (templateId === 'nextjs') return 'nextjs';
+    if (templateId === 'react-vite') return 'react';
+    if (templateId === 'express-api') return 'express';
+    if (templateId === 'express-prisma') return 'express-prisma';
+    if (templateId === 'react-express') return 'react-express';
+    if (templateId === 'react-express-prisma') return 'react-express-prisma';
+
+    // 2. Detect from project structure (full-stack monorepo)
+    const hasClientDir = files.some((f) => f.path.startsWith('client/'));
+    const hasServerDir = files.some((f) => f.path.startsWith('server/'));
+    const hasPrismaSchema = files.some(
+      (f) =>
+        f.path === 'prisma/schema.prisma' ||
+        f.path === 'server/prisma/schema.prisma',
+    );
+
+    if (hasClientDir && hasServerDir) {
+      return hasPrismaSchema ? 'react-express-prisma' : 'react-express';
+    }
+
+    // 3. Detect from package.json dependencies
+    const pkgFile = files.find((f) => f.path === 'package.json');
+    if (pkgFile) {
+      try {
+        const pkg = JSON.parse(pkgFile.content);
+        const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+        if (allDeps.next) return 'nextjs';
+        if (allDeps['@prisma/client'] && allDeps.express && !allDeps.react)
+          return 'express-prisma';
+        if (allDeps.express && !allDeps.react) return 'express';
+        if (allDeps.react) return 'react';
+      } catch {
+        // Invalid package.json
+      }
+    }
+
+    return 'react';
   }
 
   private async applyFileChanges(

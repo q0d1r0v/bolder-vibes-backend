@@ -20,16 +20,15 @@ export class SandboxService {
     return this.runner.execute(projectId, command, config);
   }
 
-  async startPreview(projectId: string) {
-    return this.previewService.startPreview(projectId);
+  async startPreview(projectId: string, userId: string) {
+    return this.previewService.startPreview(projectId, userId);
   }
 
   async getPreviewStatus(projectId: string) {
     return this.previewService.getPreviewStatus(projectId);
   }
 
-  async stopPreview(projectId: string) {
-    await this.runner.cleanup(projectId);
-    await this.previewService.stopPreview(projectId);
+  async stopPreview(projectId: string, userId?: string) {
+    await this.previewService.stopPreview(projectId, userId);
   }
 }

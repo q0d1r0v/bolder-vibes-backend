@@ -11,6 +11,7 @@ export const envValidationSchema = Joi.object({
 
   // Database
   DATABASE_URL: Joi.string().required(),
+  DATABASE_PASSWORD: Joi.string().default('postgres'),
 
   // Redis
   REDIS_HOST: Joi.string().default('localhost'),
@@ -23,12 +24,9 @@ export const envValidationSchema = Joi.object({
   JWT_REFRESH_SECRET: Joi.string().min(32).required(),
   JWT_REFRESH_EXPIRATION: Joi.string().default('7d'),
 
-  // AI Providers
-  OPENAI_API_KEY: Joi.string().required(),
-  OPENAI_MODEL: Joi.string().default('gpt-4'),
-  OPENAI_MAX_TOKENS: Joi.number().default(4096),
+  // AI Provider (Anthropic Claude)
   ANTHROPIC_API_KEY: Joi.string().required(),
-  ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-20250514'),
+  ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-6-20260402'),
   ANTHROPIC_MAX_TOKENS: Joi.number().default(8192),
 
   // CORS

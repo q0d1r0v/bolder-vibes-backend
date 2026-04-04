@@ -10,6 +10,8 @@ export interface SandboxConfig {
   maxMemoryMb: number;
   maxCpuPercent: number;
   networkEnabled: boolean;
+  envVars?: Record<string, string>;
+  dockerNetwork?: string;
 }
 
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {

@@ -5,6 +5,8 @@ export interface JoinProjectPayload {
 export interface SendMessagePayload {
   conversationId: string;
   content: string;
+  model?: string;
+  planMode?: boolean;
 }
 
 export interface CancelTaskPayload {

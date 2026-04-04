@@ -27,8 +27,20 @@ export const SERVER_EVENTS = {
   PREVIEW_READY: 'preview:ready',
   PREVIEW_ERROR: 'preview:error',
 
+  // Sandbox log streaming
+  SANDBOX_LOG: 'sandbox:log',
+
+  // Chat streaming events
+  CHAT_RESPONSE_START: 'chat:response_start',
+  CHAT_RESPONSE_CHUNK: 'chat:response_chunk',
+  CHAT_RESPONSE_END: 'chat:response_end',
+  CHAT_RESPONSE_ERROR: 'chat:response_error',
+
   // Message events
   MESSAGE_RECEIVED: 'message:received',
+
+  // Conversation events
+  CONVERSATION_TITLE_UPDATED: 'conversation:title_updated',
 
   // Error
   ERROR: 'error',

@@ -42,7 +42,16 @@ export class ProjectsService {
   }
 
   async findAll(userId: string, pagination: PaginationDto) {
-    const where = { ownerId: userId, status: { not: 'DELETED' as const } };
+    const where: Record<string, unknown> = {
+      ownerId: userId,
+      status: pagination.status
+        ? pagination.status
+        : { not: 'DELETED' as const },
+    };
+
+    if (pagination.search) {
+      where.name = { contains: pagination.search, mode: 'insensitive' };
+    }
 
     const [projects, total] = await Promise.all([
       this.prisma.project.findMany({

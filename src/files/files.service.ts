@@ -1,9 +1,10 @@
-import { Injectable, Inject, NotFoundException, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, PayloadTooLargeException, forwardRef } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service.js';
 import { ProjectsService } from '@/projects/projects.service.js';
 import { VersioningService } from './versioning/versioning.service.js';
 import { EventsGateway } from '@/gateway/events.gateway.js';
 import { CreateFileDto, UpdateFileDto } from './dtos/index.js';
+import { PreviewService } from '@/sandbox/preview/preview.service.js';
 
 @Injectable()
 export class FilesService {
@@ -13,10 +14,27 @@ export class FilesService {
     private readonly versioningService: VersioningService,
     @Inject(forwardRef(() => EventsGateway))
     private readonly gateway: EventsGateway,
+    private readonly previewService: PreviewService,
   ) {}
+
+  private static readonly MAX_PROJECT_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 
   async create(projectId: string, dto: CreateFileDto, userId: string) {
     await this.projectsService.findById(projectId, userId);
+
+    // Check user file quota
+    const totalSize = await this.prisma.projectFile.aggregate({
+      where: { projectId },
+      _sum: { size: true },
+    });
+    const currentSize = totalSize._sum.size || 0;
+    const newFileSize = Buffer.byteLength(dto.content, 'utf8');
+
+    if (currentSize + newFileSize > FilesService.MAX_PROJECT_SIZE_BYTES) {
+      throw new PayloadTooLargeException(
+        `Project storage limit exceeded (max ${FilesService.MAX_PROJECT_SIZE_BYTES / 1024 / 1024}MB). Delete some files to free up space.`,
+      );
+    }
 
     const file = await this.prisma.projectFile.create({
       data: {
@@ -38,6 +56,7 @@ export class FilesService {
     );
 
     this.gateway.emitFileCreated(projectId, file.id, dto.path);
+    await this.previewService.syncFile(projectId, dto.path, dto.content);
 
     return file;
   }
@@ -100,6 +119,7 @@ export class FilesService {
     );
 
     this.gateway.emitFileUpdated(projectId, fileId, file.path);
+    await this.previewService.syncFile(projectId, file.path, dto.content);
 
     return updated;
   }
@@ -108,6 +128,7 @@ export class FilesService {
     const file = await this.findById(projectId, fileId, userId);
     await this.prisma.projectFile.delete({ where: { id: fileId } });
     this.gateway.emitFileDeleted(projectId, fileId, file.path);
+    await this.previewService.syncFile(projectId, file.path, null);
     return { deleted: true };
   }
 

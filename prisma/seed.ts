@@ -10,7 +10,14 @@ async function main() {
   const prisma = new PrismaClient({ adapter });
 
   // Create default admin user
-  const passwordHash = await bcrypt.hash('admin12345678', 12);
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminPassword) {
+    throw new Error(
+      'SEED_ADMIN_PASSWORD environment variable is required for seeding. ' +
+      'Set it before running the seed script.',
+    );
+  }
+  const passwordHash = await bcrypt.hash(adminPassword, 12);
 
   await prisma.user.upsert({
     where: { email: 'admin@boldervibes.local' },

@@ -35,7 +35,7 @@ export class SandboxController {
     @CurrentUser('id') userId: string,
   ) {
     await this.projectsService.findById(projectId, userId);
-    return this.sandboxService.startPreview(projectId);
+    return this.sandboxService.startPreview(projectId, userId);
   }
 
   @Get('preview/status')
@@ -44,7 +44,16 @@ export class SandboxController {
     @CurrentUser('id') userId: string,
   ) {
     await this.projectsService.findById(projectId, userId);
-    return this.sandboxService.getPreviewStatus(projectId);
+    const state = await this.sandboxService.getPreviewStatus(projectId);
+    // Include proxy URL so the frontend iframe can use the same-origin proxy
+    // instead of connecting to the raw Docker port (which causes CORS issues).
+    return {
+      ...state,
+      proxyUrl:
+        state.status === 'ready'
+          ? `/api/v1/projects/${projectId}/preview/`
+          : undefined,
+    };
   }
 
   @Post('preview/stop')
@@ -53,6 +62,6 @@ export class SandboxController {
     @CurrentUser('id') userId: string,
   ) {
     await this.projectsService.findById(projectId, userId);
-    return this.sandboxService.stopPreview(projectId);
+    return this.sandboxService.stopPreview(projectId, userId);
   }
 }

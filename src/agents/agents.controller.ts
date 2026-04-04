@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AgentOrchestratorService } from './orchestrator/agent-orchestrator.service.js';
 import { ProjectsService } from '@/projects/projects.service.js';
@@ -32,6 +32,10 @@ export class AgentsController {
     @CurrentUser('id') userId: string,
   ) {
     await this.projectsService.findById(projectId, userId);
-    return this.orchestrator.getTaskDetail(taskId);
+    const task = await this.orchestrator.getTaskDetail(taskId, projectId);
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+    return task;
   }
 }

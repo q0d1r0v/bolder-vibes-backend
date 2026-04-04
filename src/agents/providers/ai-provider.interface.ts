@@ -38,5 +38,4 @@ export interface AiProvider {
   ): AsyncIterable<AiProviderStreamChunk>;
 }
 
-export const AI_PROVIDER_OPENAI = 'AI_PROVIDER_OPENAI';
 export const AI_PROVIDER_ANTHROPIC = 'AI_PROVIDER_ANTHROPIC';

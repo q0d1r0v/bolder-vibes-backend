@@ -12,9 +12,32 @@ export interface Runner {
     workDir: string,
     command: string,
     config?: Partial<SandboxConfig>,
+    containerPort?: number,
   ): Promise<{ containerId: string; port: number }>;
 
   cleanup(projectId: string): Promise<void>;
+
+  execInContainer?(
+    projectId: string,
+    command: string,
+    timeoutMs?: number,
+  ): Promise<{ stdout: string; stderr: string }>;
+
+  streamLogs?(
+    projectId: string,
+    onLog: (line: string) => void,
+  ): { stop: () => void };
+
+  getContainerLogs?(projectId: string): Promise<string>;
+
+  createNetwork?(name: string): Promise<void>;
+  startDatabase?(
+    projectId: string,
+    networkName: string,
+    dbPassword?: string,
+  ): Promise<{ containerId: string }>;
+  stopDatabase?(projectId: string): Promise<void>;
+  removeNetwork?(name: string): Promise<void>;
 }
 
 export const RUNNER_TOKEN = 'RUNNER_TOKEN';
