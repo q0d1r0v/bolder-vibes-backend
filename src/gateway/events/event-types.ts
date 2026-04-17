@@ -3,6 +3,7 @@ export const CLIENT_EVENTS = {
   JOIN_PROJECT: 'join_project',
   LEAVE_PROJECT: 'leave_project',
   SEND_MESSAGE: 'send_message',
+  STOP_CHAT: 'stop_chat',
   CANCEL_TASK: 'cancel_task',
 } as const;
 
@@ -26,6 +27,19 @@ export const SERVER_EVENTS = {
   PREVIEW_BUILDING: 'preview:building',
   PREVIEW_READY: 'preview:ready',
   PREVIEW_ERROR: 'preview:error',
+  PREVIEW_STOPPED: 'preview:stopped',
+
+  // Native preview (Expo Go tunnel) events
+  PREVIEW_NATIVE_STARTING: 'preview:native_starting',
+  PREVIEW_NATIVE_READY: 'preview:native_ready',
+  PREVIEW_NATIVE_ERROR: 'preview:native_error',
+  PREVIEW_NATIVE_STOPPED: 'preview:native_stopped',
+
+  // APK build events
+  APK_BUILD_STARTED: 'apk:build_started',
+  APK_BUILD_PROGRESS: 'apk:build_progress',
+  APK_BUILD_READY: 'apk:build_ready',
+  APK_BUILD_ERROR: 'apk:build_error',
 
   // Sandbox log streaming
   SANDBOX_LOG: 'sandbox:log',

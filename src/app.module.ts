@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { CommonModule } from './common/common.module.js';
+import { LoggerModule } from './common/logger/logger.module.js';
+import { MetricsModule } from './common/metrics/metrics.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -15,7 +18,6 @@ import { ConversationsModule } from './conversations/conversations.module.js';
 import { AgentsModule } from './agents/agents.module.js';
 import { GatewayModule } from './gateway/gateway.module.js';
 import { SandboxModule } from './sandbox/sandbox.module.js';
-import { DeployModule } from './deploy/deploy.module.js';
 import { JwtAuthGuard } from './common/guards/index.js';
 import { RolesGuard } from './common/guards/index.js';
 import {
@@ -70,6 +72,11 @@ import {
       }),
     }),
 
+    // Observability
+    SentryModule.forRoot(),
+    LoggerModule,
+    MetricsModule,
+
     // Infrastructure
     PrismaModule,
     RedisModule,
@@ -84,23 +91,16 @@ import {
     AgentsModule,
     GatewayModule,
     SandboxModule,
-    DeployModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: RolesGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
+    // Sentry filter must come FIRST so it sees exceptions before any
+    // other filter has a chance to catch and rewrite them.
+    { provide: APP_FILTER, useClass: SentryGlobalFilter },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

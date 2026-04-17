@@ -1,11 +1,17 @@
+// MUST be the first import — wires up Sentry auto-instrumentation before
+// any other module has a chance to load. When SENTRY_DSN is unset this
+// is a no-op.
+import './instrument.js';
+
 import { Agent, setGlobalDispatcher } from 'undici';
 setGlobalDispatcher(new Agent({ connect: { family: 4 } }));
 
 import './register-paths.js';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import express from 'express';
@@ -40,6 +46,10 @@ async function bootstrap() {
     bufferLogs: true,
   });
 
+  // Swap NestJS's default Logger for Pino — gives us structured JSON logs
+  // + request-scoped correlation IDs automatically.
+  app.useLogger(app.get(PinoLogger));
+
   const configService = app.get(ConfigService);
   const preferredPort = configService.get<number>('app.port', 3000);
   const debug = configService.get<boolean>('app.debug', false);
@@ -50,9 +60,7 @@ async function bootstrap() {
   const isProduction = configService.get('app.nodeEnv') === 'production';
 
   // In production, use the configured port directly; in dev, auto-find a free port
-  const port = isProduction
-    ? preferredPort
-    : await findFreePort(preferredPort);
+  const port = isProduction ? preferredPort : await findFreePort(preferredPort);
 
   // CORS — also allow the actual port we're binding to
   const actualOrigin = `http://localhost:${port}`;
@@ -64,18 +72,24 @@ async function bootstrap() {
   app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
 
-  // Security — configure CSP for Monaco editor (requires unsafe-eval/inline) and WebSockets
+  // Security — configure CSP for Monaco editor (requires unsafe-eval/inline) and WebSockets.
+  // Preview containers run on dynamic localhost ports, so allow iframing them
+  // from any local port in both dev and production (the host is always local).
   app.use(
     helmet({
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
           scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          styleSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            'https://fonts.googleapis.com',
+          ],
           fontSrc: ["'self'", 'https://fonts.gstatic.com'],
           imgSrc: ["'self'", 'data:', 'blob:'],
           connectSrc: ["'self'", ...allOrigins, 'ws:', 'wss:'],
-          frameSrc: ["'self'"],
+          frameSrc: ["'self'", 'http://localhost:*', 'http://127.0.0.1:*'],
           frameAncestors: ["'self'"],
         },
       },
@@ -122,15 +136,15 @@ async function bootstrap() {
 
   await app.listen(port);
 
-  const logger = new Logger('Bootstrap');
+  const logger = app.get(PinoLogger);
   if (port !== preferredPort) {
     logger.warn(
       `Port ${preferredPort} was busy — listening on port ${port} instead`,
     );
   }
-  logger.log(`Application running on port ${port}`);
-  logger.log(`Debug mode: ${debug}`);
-  logger.log(`Environment: ${configService.get('app.nodeEnv')}`);
+  logger.log(
+    `Application running on port ${port} (env=${configService.get('app.nodeEnv')}, debug=${String(debug)})`,
+  );
 }
 
-bootstrap();
+void bootstrap();

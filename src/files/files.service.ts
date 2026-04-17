@@ -1,10 +1,17 @@
-import { Injectable, Inject, NotFoundException, PayloadTooLargeException, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  PayloadTooLargeException,
+  forwardRef,
+} from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service.js';
 import { ProjectsService } from '@/projects/projects.service.js';
 import { VersioningService } from './versioning/versioning.service.js';
 import { EventsGateway } from '@/gateway/events.gateway.js';
 import { CreateFileDto, UpdateFileDto } from './dtos/index.js';
 import { PreviewService } from '@/sandbox/preview/preview.service.js';
+import { NativePreviewService } from '@/sandbox/preview/native-preview.service.js';
 
 @Injectable()
 export class FilesService {
@@ -15,7 +22,30 @@ export class FilesService {
     @Inject(forwardRef(() => EventsGateway))
     private readonly gateway: EventsGateway,
     private readonly previewService: PreviewService,
+    private readonly nativePreviewService: NativePreviewService,
   ) {}
+
+  /** Fan-out helper — see identical pattern in ChatAiService. */
+  private async syncFileToPreviews(
+    projectId: string,
+    filePath: string,
+    content: string,
+  ): Promise<void> {
+    await Promise.allSettled([
+      this.previewService.syncFile(projectId, filePath, content),
+      this.nativePreviewService.syncFile(projectId, filePath, content),
+    ]);
+  }
+
+  private async deleteFileFromPreviews(
+    projectId: string,
+    filePath: string,
+  ): Promise<void> {
+    await Promise.allSettled([
+      this.previewService.syncFile(projectId, filePath, null),
+      this.nativePreviewService.deleteFile(projectId, filePath),
+    ]);
+  }
 
   private static readonly MAX_PROJECT_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 
@@ -56,7 +86,7 @@ export class FilesService {
     );
 
     this.gateway.emitFileCreated(projectId, file.id, dto.path);
-    await this.previewService.syncFile(projectId, dto.path, dto.content);
+    await this.syncFileToPreviews(projectId, dto.path, dto.content);
 
     return file;
   }
@@ -119,7 +149,7 @@ export class FilesService {
     );
 
     this.gateway.emitFileUpdated(projectId, fileId, file.path);
-    await this.previewService.syncFile(projectId, file.path, dto.content);
+    await this.syncFileToPreviews(projectId, file.path, dto.content);
 
     return updated;
   }
@@ -128,7 +158,7 @@ export class FilesService {
     const file = await this.findById(projectId, fileId, userId);
     await this.prisma.projectFile.delete({ where: { id: fileId } });
     this.gateway.emitFileDeleted(projectId, fileId, file.path);
-    await this.previewService.syncFile(projectId, file.path, null);
+    await this.deleteFileFromPreviews(projectId, file.path);
     return { deleted: true };
   }
 

@@ -7,8 +7,10 @@ import {
   Param,
   Body,
   Query,
+  Res,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ProjectsService } from './projects.service.js';
 import { CreateProjectDto, UpdateProjectDto } from './dtos/index.js';
 import { CurrentUser } from '@/common/decorators/index.js';
@@ -62,5 +64,33 @@ export class ProjectsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.projectsService.remove(id, userId);
+  }
+
+  @Get(':id/download')
+  async download(
+    @Param('id', ParseUuidPipe) id: string,
+    @CurrentUser('id') userId: string,
+    @Res() res: Response,
+  ) {
+    const { archive, filename } = await this.projectsService.buildProjectZip(
+      id,
+      userId,
+    );
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`,
+    );
+    // Surface the filename to the browser when CORS is in play — Fetch
+    // exposes only a safelist by default.
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+
+    archive.on('error', (err) => {
+      if (!res.headersSent) res.status(500);
+      res.end(`Archive error: ${err.message}`);
+    });
+
+    archive.pipe(res);
   }
 }

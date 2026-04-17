@@ -76,7 +76,8 @@ export class DockerRunnerService implements Runner {
       const err = error as Record<string, unknown>;
       return {
         stdout: (err.stdout as string) || '',
-        stderr: (err.stderr as string) || (err.message as string) || 'Unknown error',
+        stderr:
+          (err.stderr as string) || (err.message as string) || 'Unknown error',
         exitCode: (err.code as number) || 1,
         durationMs: Date.now() - start,
       };
@@ -89,23 +90,58 @@ export class DockerRunnerService implements Runner {
     command: string,
     config?: Partial<SandboxConfig>,
     containerPort?: number,
-  ): Promise<{ containerId: string; port: number }> {
+  ): Promise<{ containerId: string; port: number; reused?: boolean }> {
     const cfg = { ...DEFAULT_SANDBOX_CONFIG, ...config };
     const suffix = containerSuffix(projectId);
     const containerName = `bv-preview-${suffix}`;
-    const hostPort = await this.findAvailablePort();
+    const image = cfg.image ?? 'node:20-alpine';
 
-    // Force remove any existing container with same name
+    // Phase 3 — container reuse. If a container is already running for
+    // this project AND the labels show it was created with the same image
+    // and same package.json SHA, just return its existing host port.
+    // Subsequent "Start Preview" clicks become ~0s instead of 20s.
+    const existing = await this.inspectContainer(containerName);
+    if (
+      existing &&
+      existing.running &&
+      existing.labels.bv_project_id === projectId &&
+      existing.labels.bv_image === image &&
+      (!cfg.labels?.bv_pkg_sha ||
+        existing.labels.bv_pkg_sha === cfg.labels.bv_pkg_sha) &&
+      existing.port
+    ) {
+      this.logger.log(
+        `Reusing preview container ${containerName} on port ${existing.port} (bv_pkg_sha=${existing.labels.bv_pkg_sha ?? 'n/a'})`,
+      );
+      return {
+        containerId: existing.id,
+        port: existing.port,
+        reused: true,
+      };
+    }
+
+    // Not reusable — tear down the old one (if any) and rebuild.
     await this.forceRemoveContainer(containerName);
 
-    // Pull image first to avoid timeout issues
+    const hostPort = await this.findAvailablePort();
+
+    // Ensure the configured image exists locally. For our custom
+    // `bv-expo-preview:*` images we do NOT fall back to `docker pull`
+    // because they are built locally via docker/expo-preview/build.sh.
+    // Surface a clear error so the operator knows what to do.
     try {
-      await execFileAsync('docker', ['image', 'inspect', 'node:20-alpine']);
-    } catch {
-      this.logger.log('Pulling node:20-alpine image...');
-      await execFileAsync('docker', ['pull', 'node:20-alpine'], {
-        timeout: 300000,
+      await execFileAsync('docker', ['image', 'inspect', image], {
+        timeout: 5000,
       });
+    } catch {
+      if (image.startsWith('bv-')) {
+        throw new Error(
+          `Docker image "${image}" not found locally. Build it first: ` +
+            `bash bolder-vibes-backend/docker/expo-preview/build.sh`,
+        );
+      }
+      this.logger.log(`Pulling ${image}...`);
+      await execFileAsync('docker', ['pull', image], { timeout: 300000 });
     }
 
     // Build env var flags
@@ -116,15 +152,50 @@ export class DockerRunnerService implements Runner {
       }
     }
 
-    // Build network flags
-    const networkFlags: string[] = [];
-    if (cfg.dockerNetwork) {
-      networkFlags.push('--network', cfg.dockerNetwork);
+    // Build label flags — used by the reuse check above and for operator
+    // debugging (`docker inspect`).
+    const labelFlags: string[] = [
+      '--label',
+      `bv_project_id=${projectId}`,
+      '--label',
+      `bv_image=${image}`,
+    ];
+    if (cfg.labels) {
+      for (const [key, value] of Object.entries(cfg.labels)) {
+        labelFlags.push('--label', `${key}=${value}`);
+      }
     }
 
-    // Ensure shared npm cache volume exists (created once, reused by all containers)
+    // Ensure shared cache volumes exist (created once, reused by all containers)
     await this.ensureNpmCacheVolume();
 
+    // Volume wiring:
+    //   - /root/.npm: npm tarball cache (small packages users add on top)
+    //   - /root/.metro-cache: Metro transform cache — seeded from the
+    //     baked image layer on first container, persisted across restarts.
+    //     Versioned name (`-v1`) so we can invalidate without dropping the
+    //     npm cache by rebuilding the base image with a new volume tag.
+    //   - NO mount on /app/node_modules — the bv-expo-preview image
+    //     provides it in its own layer, and a volume mount there would
+    //     mask the baked node_modules. That is the entire point.
+    const volumeFlags: string[] = [
+      '-v',
+      `${workDir}:/app`,
+      '-v',
+      'bv-npm-cache:/root/.npm',
+    ];
+    if (image.startsWith('bv-expo-preview')) {
+      volumeFlags.push('-v', 'bv-metro-cache-v1:/root/.metro-cache');
+    } else {
+      // Legacy fallback: when running on raw node:20-alpine (e.g. tests or
+      // a transitional deployment), keep the old node_modules volume so
+      // npm install still benefits from cross-container caching.
+      volumeFlags.push('-v', 'bv-expo-modules:/app/node_modules');
+    }
+
+    // Start on the default bridge network (internet access for apk/npm).
+    // If a custom docker network is needed (e.g. for database), we connect
+    // the container to it AFTER startup so it has both internet + DB access.
     const args = [
       'run',
       '-d',
@@ -134,17 +205,14 @@ export class DockerRunnerService implements Runner {
       `${cfg.maxMemoryMb}m`,
       '--cpus',
       `${cfg.maxCpuPercent / 100}`,
-      ...networkFlags,
       ...envFlags,
-      '-v',
-      `${workDir}:/app`,
-      '-v',
-      'bv-npm-cache:/root/.npm',  // Shared npm cache across all preview containers
+      ...labelFlags,
+      ...volumeFlags,
       '-w',
       '/app',
       '-p',
       `${hostPort}:${containerPort ?? 3000}`,
-      'node:20-alpine',
+      image,
       'sh',
       '-c',
       command,
@@ -154,11 +222,91 @@ export class DockerRunnerService implements Runner {
       timeout: cfg.timeoutMs,
     });
 
+    // Connect to the custom network (for DB access) while keeping the
+    // default bridge network (for internet/apk/npm).
+    if (cfg.dockerNetwork) {
+      await execFileAsync(
+        'docker',
+        ['network', 'connect', cfg.dockerNetwork, containerName],
+        { timeout: 10000 },
+      );
+    }
+
     this.logger.log(
-      `Preview container started: ${containerName} on port ${hostPort}`,
+      `Preview container started: ${containerName} on port ${hostPort} (image=${image})`,
     );
 
     return { containerId: stdout.trim(), port: hostPort };
+  }
+
+  async containerExists(projectId: string): Promise<boolean> {
+    const suffix = containerSuffix(projectId);
+    const containerName = `bv-preview-${suffix}`;
+    try {
+      await execFileAsync(
+        'docker',
+        ['inspect', '--format', '{{.State.Running}}', containerName],
+        { timeout: 5000 },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Inspect a container by name and return its running state, first-mapped
+   * host port, and labels. Returns `null` if the container does not exist.
+   * Used by `startLongRunning()` to decide whether an existing container
+   * can be reused instead of destroyed and rebuilt.
+   */
+  private async inspectContainer(name: string): Promise<{
+    id: string;
+    running: boolean;
+    port: number | null;
+    labels: Record<string, string>;
+  } | null> {
+    try {
+      const { stdout } = await execFileAsync('docker', ['inspect', name], {
+        timeout: 5000,
+      });
+      const data = JSON.parse(stdout) as Array<{
+        Id: string;
+        State: { Running: boolean };
+        Config: { Labels: Record<string, string> | null };
+        NetworkSettings: {
+          Ports: Record<
+            string,
+            Array<{ HostIp: string; HostPort: string }> | null
+          >;
+        };
+      }>;
+      if (!data.length) return null;
+      const c = data[0];
+      const labels = c.Config.Labels ?? {};
+
+      // Extract the first published host port (we only ever publish one).
+      let port: number | null = null;
+      const ports = c.NetworkSettings.Ports ?? {};
+      for (const bindings of Object.values(ports)) {
+        if (bindings && bindings.length) {
+          const p = parseInt(bindings[0].HostPort, 10);
+          if (Number.isFinite(p)) {
+            port = p;
+            break;
+          }
+        }
+      }
+
+      return {
+        id: c.Id,
+        running: c.State.Running,
+        port,
+        labels,
+      };
+    } catch {
+      return null;
+    }
   }
 
   private async forceRemoveContainer(name: string): Promise<void> {
@@ -199,9 +347,7 @@ export class DockerRunnerService implements Runner {
       return {
         stdout: (err.stdout as string) || '',
         stderr:
-          (err.stderr as string) ||
-          (err.message as string) ||
-          'Unknown error',
+          (err.stderr as string) || (err.message as string) || 'Unknown error',
       };
     }
   }
@@ -220,7 +366,13 @@ export class DockerRunnerService implements Runner {
     const suffix = containerSuffix(projectId);
     const containerName = `bv-preview-${suffix}`;
 
-    const child = spawn('docker', ['logs', '-f', '--tail', '100', containerName]);
+    const child = spawn('docker', [
+      'logs',
+      '-f',
+      '--tail',
+      '100',
+      containerName,
+    ]);
 
     const handleData = (data: Buffer) => {
       const lines = data.toString().split('\n');
@@ -235,7 +387,9 @@ export class DockerRunnerService implements Runner {
     child.stderr.on('data', handleData);
 
     child.on('error', (err) => {
-      this.logger.debug(`Log stream error for ${containerName}: ${err.message}`);
+      this.logger.debug(
+        `Log stream error for ${containerName}: ${err.message}`,
+      );
     });
 
     child.on('close', () => {
@@ -331,11 +485,7 @@ export class DockerRunnerService implements Runner {
 
     // Pull postgres image if not present
     try {
-      await execFileAsync('docker', [
-        'image',
-        'inspect',
-        'postgres:16-alpine',
-      ]);
+      await execFileAsync('docker', ['image', 'inspect', 'postgres:16-alpine']);
     } catch {
       this.logger.log('Pulling postgres:16-alpine image...');
       await execFileAsync('docker', ['pull', 'postgres:16-alpine'], {
@@ -382,11 +532,28 @@ export class DockerRunnerService implements Runner {
    * Cuts subsequent npm installs from minutes to seconds.
    */
   private async ensureNpmCacheVolume(): Promise<void> {
-    try {
-      await execFileAsync('docker', ['volume', 'inspect', 'bv-npm-cache'], { timeout: 5000 });
-    } catch {
-      await execFileAsync('docker', ['volume', 'create', 'bv-npm-cache'], { timeout: 5000 });
-      this.logger.log('Created shared npm cache volume: bv-npm-cache');
+    // bv-npm-cache     : npm tarball cache (all containers)
+    // bv-metro-cache-v1: Metro transform cache, seeded from the baked
+    //                    bv-expo-preview image on first use. Versioned
+    //                    so we can invalidate it by bumping the suffix
+    //                    when the base image's baked cache changes.
+    // bv-expo-modules  : legacy node_modules volume, kept only for
+    //                    non-bv-expo-preview images (fallback path).
+    for (const vol of [
+      'bv-npm-cache',
+      'bv-metro-cache-v1',
+      'bv-expo-modules',
+    ]) {
+      try {
+        await execFileAsync('docker', ['volume', 'inspect', vol], {
+          timeout: 5000,
+        });
+      } catch {
+        await execFileAsync('docker', ['volume', 'create', vol], {
+          timeout: 5000,
+        });
+        this.logger.log(`Created shared volume: ${vol}`);
+      }
     }
   }
 

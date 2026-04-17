@@ -19,6 +19,7 @@ import { CLIENT_EVENTS, SERVER_EVENTS } from './events/event-types.js';
 import type {
   JoinProjectPayload,
   SendMessagePayload,
+  StopChatPayload,
   CancelTaskPayload,
 } from './events/event-payloads.js';
 import type { JwtPayload } from '@/common/interfaces/index.js';
@@ -103,7 +104,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: SendMessagePayload,
   ) {
     this.logger.log(`>>> send_message received: ${JSON.stringify(data)}`);
-    const user = (client as unknown as Record<string, unknown>).user as JwtPayload;
+    const user = (client as unknown as Record<string, unknown>)
+      .user as JwtPayload;
     if (!user) {
       this.logger.warn('>>> No user on socket, ignoring message');
       return { status: 'error', error: 'Not authenticated' };
@@ -131,12 +133,16 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     user: JwtPayload,
     data: SendMessagePayload,
   ) {
-    this.logger.log(`>>> processChatMessage started for conv: ${data.conversationId}`);
+    this.logger.log(
+      `>>> processChatMessage started for conv: ${data.conversationId}`,
+    );
     // Validate conversation ownership
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: data.conversationId },
     });
-    this.logger.log(`>>> conversation found: ${!!conversation}, userId match: ${conversation?.userId === user.sub}`);
+    this.logger.log(
+      `>>> conversation found: ${!!conversation}, userId match: ${conversation?.userId === user.sub}`,
+    );
 
     if (!conversation || conversation.userId !== user.sub) {
       client.emit(SERVER_EVENTS.CHAT_RESPONSE_ERROR, {
@@ -167,27 +173,47 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Auto-generate title on first message (fire-and-forget)
       if (conversation.title === 'New Conversation') {
-        this.chatAiService.generateTitle(data.content).then(async (title) => {
-          await this.prisma.conversation.update({
-            where: { id: data.conversationId },
-            data: { title },
+        this.chatAiService
+          .generateTitle(data.content)
+          .then(async (title) => {
+            await this.prisma.conversation.update({
+              where: { id: data.conversationId },
+              data: { title },
+            });
+            this.emitToProject(
+              conversation.projectId,
+              SERVER_EVENTS.CONVERSATION_TITLE_UPDATED,
+              { conversationId: data.conversationId, title },
+            );
+          })
+          .catch((err) => {
+            this.logger.warn(`Title generation failed: ${err}`);
           });
-          this.emitToProject(
-            conversation.projectId,
-            SERVER_EVENTS.CONVERSATION_TITLE_UPDATED,
-            { conversationId: data.conversationId, title },
-          );
-        }).catch((err) => {
-          this.logger.warn(`Title generation failed: ${err}`);
-        });
       }
 
-      // Start streaming AI response
-      this.emitToProject(
-        conversation.projectId,
-        SERVER_EVENTS.CHAT_RESPONSE_START,
-        { conversationId: data.conversationId },
-      );
+      // Belt-and-braces: guarantee the sending socket is in the project
+      // room so room-broadcast file/preview events reach it even if the
+      // frontend's join_project handshake hadn't completed before
+      // send_message fired (race on first load / reconnect).
+      const room = `project:${conversation.projectId}`;
+      if (!client.rooms.has(room)) {
+        await client.join(room);
+      }
+
+      // Chat response events go DIRECTLY to the sending socket, not to
+      // the room. Reason: the sending client is the primary audience,
+      // and room-broadcast was dropping events when the socket had been
+      // momentarily disconnected or hadn't finished joining. Direct emit
+      // is reliable because Socket.IO buffers per-client when offline.
+      // File/preview change events remain room-broadcast below so other
+      // tabs or observers still see them.
+      const emitToChat = <T>(event: string, payload: T) => {
+        client.emit(event, payload);
+      };
+
+      emitToChat(SERVER_EVENTS.CHAT_RESPONSE_START, {
+        conversationId: data.conversationId,
+      });
 
       let fullResponse = '';
 
@@ -199,14 +225,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         switch (event.type) {
           case 'text':
             fullResponse += event.content || '';
-            this.emitToProject(
-              conversation.projectId,
-              SERVER_EVENTS.CHAT_RESPONSE_CHUNK,
-              {
-                conversationId: data.conversationId,
-                chunk: event.content,
-              },
-            );
+            emitToChat(SERVER_EVENTS.CHAT_RESPONSE_CHUNK, {
+              conversationId: data.conversationId,
+              chunk: event.content,
+            });
             break;
 
           case 'file_operation':
@@ -215,30 +237,37 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
               switch (op.type) {
                 case 'create':
                   if (op.fileId) {
-                    this.emitFileCreated(conversation.projectId, op.fileId, op.path);
+                    this.emitFileCreated(
+                      conversation.projectId,
+                      op.fileId,
+                      op.path,
+                    );
                   }
                   break;
                 case 'update':
                   if (op.fileId) {
-                    this.emitFileUpdated(conversation.projectId, op.fileId, op.path);
+                    this.emitFileUpdated(
+                      conversation.projectId,
+                      op.fileId,
+                      op.path,
+                    );
                   }
                   break;
                 case 'delete':
                   if (op.fileId) {
-                    this.emitFileDeleted(conversation.projectId, op.fileId, op.path);
+                    this.emitFileDeleted(
+                      conversation.projectId,
+                      op.fileId,
+                      op.path,
+                    );
                   }
                   break;
               }
-              // Also send file operation info to chat stream
-              this.emitToProject(
-                conversation.projectId,
-                SERVER_EVENTS.CHAT_RESPONSE_CHUNK,
-                {
-                  conversationId: data.conversationId,
-                  chunk: '',
-                  fileOperation: op,
-                },
-              );
+              emitToChat(SERVER_EVENTS.CHAT_RESPONSE_CHUNK, {
+                conversationId: data.conversationId,
+                chunk: '',
+                fileOperation: op,
+              });
             }
             break;
 
@@ -248,25 +277,28 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       }
 
-      // Save assistant message to DB
-      const assistantMsg = await this.prisma.message.create({
-        data: {
-          role: 'ASSISTANT',
-          content: fullResponse,
-          conversationId: data.conversationId,
-        },
-      });
+      // Save assistant message to DB (only if non-empty — skip for full
+      // aborts that produced no text so we don't pollute history with
+      // empty rows).
+      let assistantMsgId: string | null = null;
+      if (fullResponse.trim().length > 0) {
+        const assistantMsg = await this.prisma.message.create({
+          data: {
+            role: 'ASSISTANT',
+            content: fullResponse,
+            conversationId: data.conversationId,
+          },
+        });
+        assistantMsgId = assistantMsg.id;
+      }
 
-      // Signal stream end
-      this.emitToProject(
-        conversation.projectId,
-        SERVER_EVENTS.CHAT_RESPONSE_END,
-        {
-          conversationId: data.conversationId,
-          messageId: assistantMsg.id,
-          content: fullResponse,
-        },
-      );
+      // Always signal stream end so the frontend resets its UI state,
+      // even on empty/aborted responses.
+      emitToChat(SERVER_EVENTS.CHAT_RESPONSE_END, {
+        conversationId: data.conversationId,
+        messageId: assistantMsgId ?? '',
+        content: fullResponse,
+      });
     } catch (error) {
       this.logger.error(
         `Chat stream error: ${error instanceof Error ? error.message : error}`,
@@ -275,7 +307,31 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         conversationId: data.conversationId,
         error: error instanceof Error ? error.message : 'AI response failed',
       });
+      // Emit end too so the frontend clears its "streaming" state even
+      // after an error — otherwise the Send button stays disabled.
+      client.emit(SERVER_EVENTS.CHAT_RESPONSE_END, {
+        conversationId: data.conversationId,
+        messageId: '',
+        content: '',
+      });
     }
+  }
+
+  @SubscribeMessage(CLIENT_EVENTS.STOP_CHAT)
+  handleStopChat(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: StopChatPayload,
+  ) {
+    const user = (client as unknown as Record<string, unknown>)
+      .user as JwtPayload;
+    if (!user) {
+      return { status: 'error', error: 'Not authenticated' };
+    }
+    const aborted = this.chatAiService.abortChat(data.conversationId);
+    this.logger.log(
+      `Stop chat for conv ${data.conversationId}: ${aborted ? 'aborted' : 'no active stream'}`,
+    );
+    return { status: 'ok', aborted };
   }
 
   @SubscribeMessage(CLIENT_EVENTS.CANCEL_TASK)

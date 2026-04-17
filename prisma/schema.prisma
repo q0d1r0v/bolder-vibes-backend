@@ -57,6 +57,11 @@ model User {
   name         String?
   role         Role     @default(USER)
   refreshToken String?  @map("refresh_token")
+  // AES-256-GCM encrypted EXPO_TOKEN (ciphertext|iv|authTag, base64-joined).
+  // Used by cloud APK builds so users can trigger `eas build` against their
+  // own Expo account without exposing the raw PAT to the app server.
+  expoTokenEnc String?  @map("expo_token_enc")
+  expoTokenSetAt DateTime? @map("expo_token_set_at")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

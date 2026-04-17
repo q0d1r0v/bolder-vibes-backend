@@ -461,26 +461,27 @@ export class AgentOrchestratorService {
     templateId: string | null,
     files: { path: string; content: string }[],
   ): string {
-    // 1. Check template ID directly
-    if (templateId === 'nextjs') return 'nextjs';
-    if (templateId === 'react-vite') return 'react';
-    if (templateId === 'express-api') return 'express';
-    if (templateId === 'express-prisma') return 'express-prisma';
-    if (templateId === 'react-express') return 'react-express';
-    if (templateId === 'react-express-prisma') return 'react-express-prisma';
-
-    // 2. Detect from project structure (full-stack monorepo)
-    const hasClientDir = files.some((f) => f.path.startsWith('client/'));
+    // 1. All industry templates use Expo — detect backend presence
+    const industryIds = [
+      'ecommerce', 'social', 'health', 'education',
+      'food', 'productivity', 'finance', 'custom',
+    ];
     const hasServerDir = files.some((f) => f.path.startsWith('server/'));
     const hasPrismaSchema = files.some(
       (f) =>
-        f.path === 'prisma/schema.prisma' ||
-        f.path === 'server/prisma/schema.prisma',
+        f.path === 'server/prisma/schema.prisma' ||
+        f.path === 'prisma/schema.prisma',
     );
 
-    if (hasClientDir && hasServerDir) {
-      return hasPrismaSchema ? 'react-express-prisma' : 'react-express';
+    if (templateId && industryIds.includes(templateId)) {
+      if (hasServerDir && hasPrismaSchema) return 'expo-fullstack';
+      if (hasServerDir) return 'expo-backend';
+      return 'expo';
     }
+
+    // 2. Detect from project structure
+    if (hasServerDir && hasPrismaSchema) return 'expo-fullstack';
+    if (hasServerDir) return 'expo-backend';
 
     // 3. Detect from package.json dependencies
     const pkgFile = files.find((f) => f.path === 'package.json');
@@ -488,17 +489,13 @@ export class AgentOrchestratorService {
       try {
         const pkg = JSON.parse(pkgFile.content);
         const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-        if (allDeps.next) return 'nextjs';
-        if (allDeps['@prisma/client'] && allDeps.express && !allDeps.react)
-          return 'express-prisma';
-        if (allDeps.express && !allDeps.react) return 'express';
-        if (allDeps.react) return 'react';
+        if (allDeps.expo || allDeps['react-native']) return 'expo';
       } catch {
         // Invalid package.json
       }
     }
 
-    return 'react';
+    return 'expo';
   }
 
   private async applyFileChanges(

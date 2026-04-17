@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "warmup",
+    "slug": "warmup",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "web": {
+      "bundler": "metro"
+    },
+    "platforms": ["web"]
+  }
+}

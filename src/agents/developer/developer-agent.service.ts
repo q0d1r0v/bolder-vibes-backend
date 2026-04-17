@@ -45,7 +45,7 @@ export class DeveloperAgentService {
     const options = {
       model: this.configService.get<string>(
         'ai.anthropic.model',
-        'claude-sonnet-4-6-20260402',
+        'claude-sonnet-4-6',
       ),
       maxTokens: this.configService.get<number>(
         'ai.anthropic.maxTokens',

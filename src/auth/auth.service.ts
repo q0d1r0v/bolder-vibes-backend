@@ -157,7 +157,10 @@ export class AuthService {
 
     // Always return success to prevent email enumeration
     if (!user) {
-      return { message: 'If an account with that email exists, a reset link has been sent.' };
+      return {
+        message:
+          'If an account with that email exists, a reset link has been sent.',
+      };
     }
 
     // Generate reset token
@@ -165,26 +168,29 @@ export class AuthService {
     const tokenHash = this.hashResetToken(resetToken);
 
     // Store in Redis with 1 hour TTL - store token hash as field, user ID as value for O(1) lookup
-    await this.redis.set(
-      `password-reset:${tokenHash}`,
-      user.id,
-      'EX',
-      3600,
-    );
+    await this.redis.set(`password-reset:${tokenHash}`, user.id, 'EX', 3600);
 
-    // In production, send email with reset link containing the token
+    // In production, send the reset link via email. We deliberately do not
+    // log the email address or the raw token — logs are frequently shipped
+    // to third-party aggregators and both are PII / bearer secrets.
     this.logger.log(
-      `Password reset requested for ${email}. Reset token generated and would be sent via email in production.`,
+      `Password reset issued (user=${user.id}); email delivery stub.`,
     );
 
-    return { message: 'If an account with that email exists, a reset link has been sent.' };
+    return {
+      message:
+        'If an account with that email exists, a reset link has been sent.',
+    };
   }
 
-  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  async resetPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
     // Hash the incoming token to look up the stored hash
     const tokenHash = this.hashResetToken(token);
     const redisKey = `password-reset:${tokenHash}`;
-    
+
     // O(1) lookup - no scanning needed
     const userId = await this.redis.get(redisKey);
 
@@ -205,7 +211,10 @@ export class AuthService {
     // Remove used token
     await this.redis.del(redisKey);
 
-    return { message: 'Password has been reset successfully. Please log in with your new password.' };
+    return {
+      message:
+        'Password has been reset successfully. Please log in with your new password.',
+    };
   }
 
   private hashResetToken(token: string): string {
@@ -216,8 +225,14 @@ export class AuthService {
   }
 
   private async generateTokens(payload: JwtPayload) {
-    const accessExpiration = this.configService.get<string>('auth.accessExpiration', '15m') as StringValue;
-    const refreshExpiration = this.configService.get<string>('auth.refreshExpiration', '7d') as StringValue;
+    const accessExpiration = this.configService.get<string>(
+      'auth.accessExpiration',
+      '15m',
+    ) as StringValue;
+    const refreshExpiration = this.configService.get<string>(
+      'auth.refreshExpiration',
+      '7d',
+    ) as StringValue;
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload as unknown as Record<string, unknown>, {

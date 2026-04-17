@@ -6,6 +6,6 @@ import { TemplatesService } from './templates/templates.service.js';
 @Module({
   controllers: [ProjectsController],
   providers: [ProjectsService, TemplatesService],
-  exports: [ProjectsService],
+  exports: [ProjectsService, TemplatesService],
 })
 export class ProjectsModule {}

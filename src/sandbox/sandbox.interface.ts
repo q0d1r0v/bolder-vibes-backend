@@ -12,6 +12,13 @@ export interface SandboxConfig {
   networkEnabled: boolean;
   envVars?: Record<string, string>;
   dockerNetwork?: string;
+  /** Docker image tag. Defaults to `node:20-alpine` for short-lived exec
+   *  sandboxes. Long-running previews override this with the pre-warmed
+   *  `bv-expo-preview:latest` image. */
+  image?: string;
+  /** Optional Docker container labels (e.g. project id, pkg SHA) used by
+   *  the runner to decide whether an existing container can be reused. */
+  labels?: Record<string, string>;
 }
 
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {

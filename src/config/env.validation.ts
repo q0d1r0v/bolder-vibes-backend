@@ -24,9 +24,13 @@ export const envValidationSchema = Joi.object({
   JWT_REFRESH_SECRET: Joi.string().min(32).required(),
   JWT_REFRESH_EXPIRATION: Joi.string().default('7d'),
 
+  // Secret used to encrypt user-supplied third-party tokens at rest (AES-256-GCM).
+  // Rotating this value invalidates all previously-stored Expo tokens.
+  SECRETS_ENCRYPTION_KEY: Joi.string().min(32).required(),
+
   // AI Provider (Anthropic Claude)
   ANTHROPIC_API_KEY: Joi.string().required(),
-  ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-6-20260402'),
+  ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-6'),
   ANTHROPIC_MAX_TOKENS: Joi.number().default(8192),
 
   // CORS
@@ -35,4 +39,10 @@ export const envValidationSchema = Joi.object({
   // Rate Limiting
   THROTTLE_TTL: Joi.number().default(60000),
   THROTTLE_LIMIT: Joi.number().default(100),
+
+  // Observability
+  LOG_LEVEL: Joi.string()
+    .valid('fatal', 'error', 'warn', 'info', 'debug', 'trace')
+    .default('info'),
+  SENTRY_DSN: Joi.string().uri().allow('').optional(),
 });

@@ -51,7 +51,7 @@ export class SandboxController {
       ...state,
       proxyUrl:
         state.status === 'ready'
-          ? `/api/v1/projects/${projectId}/preview/`
+          ? `/api/v1/projects/${projectId}/preview/app`
           : undefined,
     };
   }

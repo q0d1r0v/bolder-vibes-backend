@@ -13,7 +13,7 @@ export interface Runner {
     command: string,
     config?: Partial<SandboxConfig>,
     containerPort?: number,
-  ): Promise<{ containerId: string; port: number }>;
+  ): Promise<{ containerId: string; port: number; reused?: boolean }>;
 
   cleanup(projectId: string): Promise<void>;
 
@@ -29,6 +29,8 @@ export interface Runner {
   ): { stop: () => void };
 
   getContainerLogs?(projectId: string): Promise<string>;
+
+  containerExists?(projectId: string): Promise<boolean>;
 
   createNetwork?(name: string): Promise<void>;
   startDatabase?(
