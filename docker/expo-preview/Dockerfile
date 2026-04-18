@@ -33,7 +33,7 @@ ENV METRO_CACHE_DIR=/root/.metro-cache \
 #    This package.json MUST stay byte-for-byte in sync with
 #    src/projects/templates/template-registry.ts EXPO_PACKAGE_JSON.
 COPY package.json ./
-RUN npm install --prefer-offline --no-audit --no-fund --loglevel=error
+RUN npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund --loglevel=error
 
 # 2. Copy the warmup project. These files exist only to force Metro to
 #    traverse and transform every heavy module the AI commonly imports
