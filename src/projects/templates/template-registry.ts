@@ -36,8 +36,9 @@ const EXPO_PACKAGE_JSON = JSON.stringify(
       'expo-status-bar': '~3.0.0',
       // Expo SDK 54 uses expo-font 14.x (despite @expo/vector-icons 15
       // being the right major). The peer dep on @expo/vector-icons is
-      // `>=14.0.4`, so 14.1 satisfies it cleanly.
-      'expo-font': '~14.1.0',
+      // `>=14.0.4`, and only 14.0.x has stable releases (14.1.x is
+      // canary-only), so we pin to ~14.0.0.
+      'expo-font': '~14.0.0',
       react: '19.1.0',
       'react-native': '0.81.4',
       'react-dom': '19.1.0',
